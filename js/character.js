@@ -41,7 +41,19 @@
   }
 
   function head(ctx, cx, cy, r, headType, facing, expr, blink, col, rnd) {
+    // Oski the Bear: round ears poke up behind the head, then a big-eyed muzzled face
+    if (headType === 'bear') {
+      const re = r * 0.42, ey0 = cy - r * 0.74;
+      for (const s of [-1, 1]) {
+        const exC = cx + s * r * 0.64;
+        D.circle(ctx, exC, ey0, re, { width: 5, color: col, rnd, fill: D.COL.paper, wob: 1.2 });          // outer ear
+        D.circle(ctx, exC, ey0 + re * 0.16, re * 0.5, { width: 3.5, color: col, rnd, fill: D.COL.paperShade }); // inner ear
+      }
+    }
+
     D.circle(ctx, cx, cy, r, { width: 5.5, color: col, rnd, wob: 1.2 });
+
+    if (headType === 'bear') { bearFace(ctx, cx, cy, r, facing, expr, blink, col, rnd); return; }
 
     // face (eyes biased toward facing)
     const ex = cx + facing * 4.5, ey = cy + 1, gap = 7;
@@ -74,6 +86,38 @@
       D.circle(ctx, cx, cy - r - 4, 4, { width: 4, color: col, rnd });
     } else if (headType === 'tuft') {
       D.curve(ctx, [[cx - 4, cy - r + 4], [cx + 2, cy - r - 8], [cx + 9, cy - r + 2]], { width: 4.5, color: col, rnd });
+    }
+  }
+
+  // Oski's face: big round eyes (pupils + a catchlight) and a soft muzzle with a nose.
+  // honours the same blink / hurt / shield / attack expressions as the default head.
+  function bearFace(ctx, cx, cy, r, facing, expr, blink, col, rnd) {
+    const gap = r * 0.44, ey = cy - r * 0.14, reye = r * 0.24;
+    for (const s of [-1, 1]) {
+      const exC = cx + facing * r * 0.04 + s * gap;
+      if (blink || expr === 'shield') {
+        D.curve(ctx, [[exC - reye * 0.85, ey - reye * 0.1], [exC, ey + reye * 0.5], [exC + reye * 0.85, ey - reye * 0.1]], { width: 3.5, color: col, rnd });
+      } else if (expr === 'hurt') {
+        D.line(ctx, exC - reye * 0.7, ey - reye * 0.7, exC + reye * 0.7, ey + reye * 0.7, { width: 3.5, color: col, rnd, passes: 1 });
+        D.line(ctx, exC + reye * 0.7, ey - reye * 0.7, exC - reye * 0.7, ey + reye * 0.7, { width: 3.5, color: col, rnd, passes: 1 });
+      } else {
+        D.circle(ctx, exC, ey, reye, { width: 3.5, color: col, rnd, fill: D.COL.paper });          // big eyeball
+        ctx.fillStyle = col;
+        ctx.beginPath(); ctx.arc(exC + facing * reye * 0.3, ey + reye * 0.15, reye * 0.52, 0, 7); ctx.fill();   // pupil (looks the way it faces)
+        ctx.fillStyle = D.COL.paper;
+        ctx.beginPath(); ctx.arc(exC + facing * reye * 0.08, ey - reye * 0.2, reye * 0.18, 0, 7); ctx.fill();    // catchlight
+      }
+    }
+    // soft muzzle + nose
+    const mx = cx + facing * 2, my = cy + r * 0.4, mrx = r * 0.5, mry = r * 0.34;
+    D.ellipse(ctx, mx, my, mrx, mry, { width: 4, color: col, rnd, fill: D.COL.paperShade, wob: 1 });
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.ellipse(mx, my - mry * 0.45, mrx * 0.32, mry * 0.26, 0, 0, 7); ctx.fill();   // nose
+    if (expr === 'attack') {
+      ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(mx, my + mry * 0.4, mrx * 0.3, mry * 0.4, 0, 0, 7); ctx.fill(); // open mouth (roar)
+    } else {
+      D.line(ctx, mx, my - mry * 0.15, mx, my + mry * 0.18, { width: 2.5, color: col, rnd, passes: 1 });               // philtrum
+      D.curve(ctx, [[mx - mrx * 0.42, my + mry * 0.18], [mx, my + mry * 0.48], [mx + mrx * 0.42, my + mry * 0.18]], { width: 2.5, color: col, rnd }); // smile
     }
   }
 

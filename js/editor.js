@@ -109,7 +109,7 @@
 
       // head style
       const hrow = el('div', 'ed-row'); hrow.appendChild(el('label', '', 'Head'));
-      const hsel = el('select'); ['spikes', 'beanie', 'tuft', 'none'].forEach((h) => { const o = el('option', '', h); o.value = h; if (ch.head === h) o.selected = true; hsel.appendChild(o); });
+      const hsel = el('select'); ['bear', 'spikes', 'beanie', 'tuft', 'none'].forEach((h) => { const o = el('option', '', h); o.value = h; if (ch.head === h) o.selected = true; hsel.appendChild(o); });
       hsel.onchange = () => { ch.head = hsel.value; this.queueSave(); }; hrow.appendChild(hsel); p.appendChild(hrow);
 
       // action selector

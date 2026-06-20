@@ -882,11 +882,21 @@
     }
 
     _face(ctx, ch, rnd) {
-      D.circle(ctx, 0, 0, 17, { width: 4.5, color: D.COL.ink, rnd });
-      ctx.strokeStyle = D.COL.ink; ctx.lineWidth = 3.5; ctx.lineCap = 'round';
+      const ink = D.COL.ink;
+      // Oski the Bear: ears + big eyes + a muzzle (mini version of character.js bearFace)
+      if (ch.head === 'bear') {
+        for (const s of [-1, 1]) { const ex = s * 11; D.circle(ctx, ex, -12, 7.5, { width: 3.5, color: ink, rnd, fill: D.COL.paper }); D.circle(ctx, ex, -11, 3.4, { width: 0, color: D.COL.paperShade, fill: D.COL.paperShade }); }
+        D.circle(ctx, 0, 0, 17, { width: 4.5, color: ink, rnd });
+        for (const s of [-1, 1]) { D.circle(ctx, s * 6, -3, 4.2, { width: 2.5, color: ink, rnd, fill: D.COL.paper }); ctx.fillStyle = ink; ctx.beginPath(); ctx.arc(s * 6, -2, 2.1, 0, 7); ctx.fill(); }
+        D.ellipse(ctx, 0, 7, 8, 5.5, { width: 3, color: ink, rnd, fill: D.COL.paperShade });
+        ctx.fillStyle = ink; ctx.beginPath(); ctx.ellipse(0, 4.5, 2.4, 1.8, 0, 0, 7); ctx.fill();
+        return;
+      }
+      D.circle(ctx, 0, 0, 17, { width: 4.5, color: ink, rnd });
+      ctx.strokeStyle = ink; ctx.lineWidth = 3.5; ctx.lineCap = 'round';
       for (const ex of [-4, 4]) { ctx.beginPath(); ctx.moveTo(ex, -2); ctx.lineTo(ex, 4); ctx.stroke(); }
-      if (ch.head === 'spikes') for (let i = -1; i <= 1; i++) D.line(ctx, i * 7, -14, i * 10, -26, { width: 4, color: D.COL.ink, rnd, passes: 1 });
-      else if (ch.head === 'beanie') { D.line(ctx, -13, -10, 13, -10, { width: 4, color: D.COL.ink, rnd, passes: 1 }); D.circle(ctx, 0, -20, 4, { width: 3.5, color: D.COL.ink, rnd }); }
+      if (ch.head === 'spikes') for (let i = -1; i <= 1; i++) D.line(ctx, i * 7, -14, i * 10, -26, { width: 4, color: ink, rnd, passes: 1 });
+      else if (ch.head === 'beanie') { D.line(ctx, -13, -10, 13, -10, { width: 4, color: ink, rnd, passes: 1 }); D.circle(ctx, 0, -20, 4, { width: 3.5, color: ink, rnd }); }
     }
 
     _heart(ctx, x, y, s, filled, rnd) {
