@@ -517,8 +517,9 @@
   }
   requestAnimationFrame(frame);
 
-  // expose for debugging
+  // expose for debugging and optional creation overlay bridge
   DS.game = game; DS.editor = editor;
+  if (DS.CreateOverlay) DS.CreateOverlay.init();
 
   // dev self-test: instant projectile + standing-jab vs dash-jab knockback (movement = power)
   if (location.hash === '#combattest') {
