@@ -19,6 +19,110 @@
   const DS = global.DS;
   const D = DS.draw;
 
+  // ---- power-up props (used by the "Power-Up Mayhem" mode) ------------------
+  // Each prop is a held item that hijacks a fighter's next F (attack). `action` is a normal
+  // move-data object (the same shape as a character action) fed straight into the fighter via
+  // _useItem → _startAction(dataOverride), so all the existing combat/pose/render plumbing works.
+  // `weapon` names the in-hand doodle; `uses` is how many times you can fire it before it's spent.
+  const ITEMS = {
+    _order: ['bat', 'blaster', 'scatter', 'bomb'],
+    defs: {
+      // the home-run hitter: ONE swing, but huge damage and a colossal launch — a near-guaranteed KO
+      bat: {
+        key: 'bat', name: 'Bat', uses: 1, icon: 'bat',
+        action: { name: 'bat', weapon: 'bat', startup: 4, active: 5, recovery: 14, cooldown: 0.42,
+          hit: { x: 56, y: -6, r: 58, damage: 24, kbBase: 82, kbScale: 0.30, angle: 35 } },
+      },
+      // rapid-fire AK: a handful of fast, light shots
+      blaster: {
+        key: 'blaster', name: 'Blaster', uses: 4, icon: 'rifle',
+        action: { name: 'gun', weapon: 'rifle', startup: 1, active: 2, recovery: 6, cooldown: 0.2,
+          projectile: { speed: 1600, damage: 7, kbBase: 15, kbScale: 0.09, angle: 0, gravity: 0, life: 1.1, r: 10 } },
+      },
+      // shotgun: a fan of short-range pellets — devastating point-blank
+      scatter: {
+        key: 'scatter', name: 'Scatter', uses: 2, icon: 'shotgun',
+        action: { name: 'shotgun', weapon: 'shotgun', startup: 3, active: 2, recovery: 15, cooldown: 0.55,
+          pellets: 5, spread: 9,
+          projectile: { speed: 1380, damage: 5, kbBase: 16, kbScale: 0.11, angle: 0, gravity: 0, life: 0.42, r: 9 } },
+      },
+      // lobbed bomb: ONE throw — rockets out in a big high arc and BOUNCES Mario-style off the
+      // stage until it clips someone (or its bounces run out), then detonates. Heavy hit.
+      bomb: {
+        key: 'bomb', name: 'Bomb', uses: 1, icon: 'bomb',
+        action: { name: 'bomb', weapon: 'bomb', startup: 6, active: 3, recovery: 18, cooldown: 0.7,
+          projectile: { cannon: true, bounce: 4, speed: 1200, damage: 20, kbBase: 44, kbScale: 0.2, angle: 60, gravity: 2800, life: 5, r: 22 } },
+      },
+    },
+    rand() { const o = this._order; return this.defs[o[(Math.random() * o.length) | 0]]; },
+  };
+
+  // a floating pickup: a big, centred prop emblem inside a glowing bubble that bobs + twinkles.
+  // (purpose-built icons — the in-hand weapon() art is positioned for being held, not centred.)
+  function drawPickup(ctx, it) {
+    const c = D.COL.accent, ink = D.COL.ink, shade = D.COL.paperShade;
+    const R = it.r, yb = it.y + Math.sin(it.bob) * 5;
+    ctx.save(); ctx.translate(it.x, yb);
+    // soft glow halo
+    ctx.globalAlpha = 0.16; D.circle(ctx, 0, 0, R * 1.5, { width: 4, color: c, rnd: DS.makeRng(3), passes: 1 }); ctx.globalAlpha = 1;
+    // four little twinkle ticks around the bubble, pulsing with the bob
+    ctx.save(); ctx.globalAlpha = 0.45 + 0.4 * Math.sin(it.bob * 1.7); ctx.strokeStyle = c; ctx.lineCap = 'round';
+    for (let i = 0; i < 4; i++) { const a = it.bob * 0.4 + i * 1.571, rr = R * 1.28; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(Math.cos(a) * rr, Math.sin(a) * rr); ctx.lineTo(Math.cos(a) * (rr + 6), Math.sin(a) * (rr + 6)); ctx.stroke(); }
+    ctx.restore();
+    // the bubble: a faintly accent-tinted disc with a sketchy accent ring
+    D.circle(ctx, 0, 0, R, { width: 4.5, color: c, rnd: DS.makeRng(5), fill: D.mix(D.COL.paper, c, 0.12) });
+    // the prop emblem — centred and bold, sized to fill the bubble
+    const key = it.key;
+    ctx.save();
+    if (key === 'bat') {
+      ctx.rotate(-0.62); const BL = 21, hw = 7; // diagonal bat, centred on the grip
+      D.strokePts(ctx, [[-4, BL], [4, BL], [hw, -BL], [-hw, -BL]], { width: 4, color: ink, rnd: DS.makeRng(7), closed: true, fill: shade });
+      D.circle(ctx, 0, -BL, 7.5, { width: 4, color: ink, rnd: DS.makeRng(8), fill: shade }); // barrel end
+      D.circle(ctx, 0, BL, 5, { width: 3.5, color: ink, rnd: DS.makeRng(9), fill: D.COL.paper }); // knob
+    } else if (key === 'blaster') {
+      // compact AK silhouette: stock + receiver + barrel + front sight + curved banana mag
+      const rnd = DS.makeRng(11); ctx.translate(-3, -4);
+      D.strokePts(ctx, [[-22, -2], [-12, 0], [-12, 5], [-22, 3]], { width: 3.5, color: ink, rnd, closed: true, fill: shade }); // stock
+      D.strokePts(ctx, [[-12, -5], [12, -5], [12, 4], [-12, 4]], { width: 4, color: ink, rnd, closed: true, fill: shade }); // receiver
+      D.line(ctx, 12, -3, 27, -3, { width: 4, color: ink, rnd, passes: 1 }); // barrel
+      D.line(ctx, 24, -7, 24, -1, { width: 3, color: ink, rnd, passes: 1 }); // front sight
+      D.strokePts(ctx, [[-1, 4], [9, 4], [14, 19], [5, 20]], { width: 4, color: ink, rnd, closed: true, fill: shade }); // banana mag
+      D.strokePts(ctx, [[-9, 4], [-2, 4], [-6, 15], [-12, 14]], { width: 3.5, color: ink, rnd, closed: true, fill: D.COL.paper }); // grip
+    } else if (key === 'scatter') {
+      // compact double-barrel shotgun: stock + breech + two stacked barrels + grip
+      const rnd = DS.makeRng(12); ctx.translate(-1, -3);
+      D.strokePts(ctx, [[-20, -1], [-10, 1], [-10, 8], [-20, 6]], { width: 3.5, color: ink, rnd, closed: true, fill: shade }); // stock
+      D.strokePts(ctx, [[-10, -6], [-2, -6], [-2, 8], [-10, 8]], { width: 4, color: ink, rnd, closed: true, fill: shade }); // breech
+      D.strokePts(ctx, [[-2, -6], [22, -6], [22, -1], [-2, -1]], { width: 3.5, color: ink, rnd, closed: true, fill: D.COL.paper }); // top barrel
+      D.strokePts(ctx, [[-2, 0], [22, 0], [22, 5], [-2, 5]], { width: 3.5, color: ink, rnd, closed: true, fill: D.COL.paper }); // bottom barrel
+      D.circle(ctx, 21, -3.5, 2.4, { width: 2.5, color: ink, rnd, fill: ink }); // top bore
+      D.circle(ctx, 21, 2.5, 2.4, { width: 2.5, color: ink, rnd, fill: ink }); // bottom bore
+      D.strokePts(ctx, [[-6, 8], [1, 8], [-3, 18], [-10, 17]], { width: 4, color: ink, rnd, closed: true, fill: D.COL.paper }); // grip
+    } else if (key === 'bomb') {
+      const rnd = DS.makeRng(13);
+      D.circle(ctx, 0, 6, 17, { width: 4.5, color: ink, rnd, fill: D.mix(ink, D.COL.paper, 0.55) }); // body
+      D.circle(ctx, -6, 0, 4.5, { width: 0, color: D.COL.paper, fill: D.COL.paper }); // shine
+      D.strokePts(ctx, [[-5, -10], [5, -10], [4, -16], [-4, -16]], { width: 3.5, color: ink, rnd, closed: true, fill: shade }); // cap
+      D.line(ctx, 0, -16, 10, -27, { width: 4, color: c, rnd, passes: 1 }); // fuse
+      D.circle(ctx, 10, -27, 3, { width: 0, color: c, fill: c }); // spark
+    }
+    ctx.restore();
+    ctx.restore();
+  }
+
+  // a small "armed" tag above a fighter holding a prop: name + remaining uses, in player colour
+  function drawHeldTag(ctx, f) {
+    const c = f.tagCol || D.COL.accent, it = f.item;
+    const x = f.x, y = f.y - f.h / 2 - 104; // above the P# name marker
+    ctx.save();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.font = "24px 'Patrick Hand', sans-serif"; ctx.lineJoin = 'round';
+    ctx.lineWidth = 5; ctx.strokeStyle = D.COL.paper;
+    const msg = it.name + ' ×' + it.left;
+    ctx.strokeText(msg, x, y); ctx.fillStyle = c; ctx.fillText(msg, x, y);
+    ctx.restore();
+  }
+
   // ---- maps ----------------------------------------------------------------
   const Maps = {
     _order: ['meadow', 'twin', 'loft', 'quarry', 'ruins', 'crates', 'bounce', 'cannons', 'portals', 'chaos'],
@@ -441,7 +545,7 @@
 
   // ---- modes ---------------------------------------------------------------
   const Modes = {
-    _order: ['smash', 'koth', 'gems', 'bounty'],
+    _order: ['smash', 'mayhem', 'koth', 'gems', 'bounty'],
     defs: {
       smash: {
         id: 'smash', name: 'Smash', win: 'Last fighter standing',
@@ -458,6 +562,70 @@
         overText(game) {
           const w = game.winner;
           return w ? 'P' + (w.pIndex + 1) + ' (' + w.name + ') wins!' : 'Draw!';
+        },
+      },
+
+      // Power-Up Mayhem — Smash rules (stocks + timer, last one standing) but random weapon
+      // pick-ups rain onto the platforms. Grab one and your next F (attack) unloads it: a bat
+      // that sends rivals flying, a rapid blaster, a scatter gun, a lobbed bomb. Drop it on KO.
+      mayhem: {
+        id: 'mayhem', name: 'Power-Up Mayhem', win: 'Last fighter standing',
+        desc: 'Smash with random weapon pick-ups raining in — grab a Bat, Blaster, Scatter gun or Bomb and unload with F. Stocks + timer; last fighter standing wins.',
+        elimination: true, usesTimer: true, spawnEvery: 6.5, maxItems: 2,
+        setup(game) {
+          game.modeState = { items: [], spawnT: 2.0, slots: this._slots(game) };
+        },
+        // candidate spawn spots: the top-centre of each platform (skip hazards / cannons)
+        _slots(game) {
+          const out = [];
+          for (const p of game.stage.platforms) {
+            if (p.kind === 'spikes' || p.kind === 'cannon' || p.kind === 'trampoline') continue;
+            out.push({ x: p.x + p.w / 2, y: p.y - 34 });
+          }
+          return out.length ? out : [{ x: game.view.w / 2, y: 200 }];
+        },
+        _spawn(game) {
+          const st = game.modeState, s = st.slots[(Math.random() * st.slots.length) | 0], def = ITEMS.rand();
+          st.items.push({ x: s.x, y: s.y, key: def.key, r: 32, bob: Math.random() * 6.28 });
+          if (DS.Audio) DS.Audio.play('gem_spawn', { x: s.x });
+        },
+        update(game, dt) {
+          const st = game.modeState;
+          // Smash rules: stocks decide it (checkOver) and the timer can end it on score
+          game.checkOver();
+          if (game.data.settings.timerSeconds > 0 && game.state === 'playing') {
+            game.timer -= dt;
+            if (game.timer <= 0) { game.timer = 0; game.finishByScore(); }
+          }
+          // drip-feed pickups onto the field
+          st.spawnT -= dt;
+          if (st.items.length < this.maxItems && st.spawnT <= 0) { this._spawn(game); st.spawnT = this.spawnEvery; }
+          for (const it of st.items) it.bob += dt * 3;
+          // pickup: an unarmed, living fighter overlapping a pickup grabs it
+          for (const f of game.fighters) {
+            if (f.dead || f.respawnT > 0 || f.item) continue;
+            for (const it of st.items) {
+              if (it.taken) continue;
+              if (Math.abs(f.x - it.x) < f.w / 2 + it.r && Math.abs(f.y - it.y) < f.h / 2 + it.r) {
+                it.taken = true;
+                const def = ITEMS.defs[it.key];
+                f.item = { key: def.key, name: def.name, left: def.uses, action: def.action };
+                game.effects.impact(it.x, it.y, 0.6);
+                game.effects.floatText(it.x, it.y - 20, def.name + '!');
+                if (DS.Audio) DS.Audio.play('gem_pickup', { x: it.x });
+              }
+            }
+          }
+          st.items = st.items.filter((it) => !it.taken);
+        },
+        renderWorld(game, ctx) {
+          const st = game.modeState;
+          for (const it of st.items) drawPickup(ctx, it);
+          for (const f of game.fighters) { if (!f.dead && f.respawnT <= 0 && f.item) drawHeldTag(ctx, f); }
+        },
+        overText(game) {
+          const w = game.winner;
+          return w ? 'P' + (w.pIndex + 1) + ' (' + w.name + ') wins the mayhem!' : 'Draw!';
         },
       },
 

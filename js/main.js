@@ -114,6 +114,12 @@
       const c = '#3f6fa0';
       D.strokePts(ctx, [[0, -20], [16, -3], [0, 20], [-16, -3]], { width: 4, color: c, rnd, closed: true, fill: PAPER });
       D.line(ctx, -16, -3, 16, -3, { width: 2.5, color: c, rnd, passes: 1 });
+    } else if (id === 'mayhem') {
+      // a power-up crate with a star — random weapon pick-ups
+      const c = '#c0603a';
+      D.roundedRect(ctx, -18, -16, 36, 34, 5, { width: 4, color: c, rnd, fill: PAPER });
+      const pts = []; for (let i = 0; i < 10; i++) { const r = i % 2 ? 4 : 10, a = i / 10 * 6.283 - Math.PI / 2; pts.push([Math.cos(a) * r, Math.sin(a) * r + 1]); }
+      D.strokePts(ctx, pts, { width: 3, color: c, rnd, closed: true, fill: c });
     } else {
       const c = '#9a6cb0';
       D.circle(ctx, 0, 0, 20, { width: 4, color: c, rnd }); D.circle(ctx, 0, 0, 12, { width: 3, color: c, rnd }); D.circle(ctx, 0, 0, 4, { width: 3, color: c, rnd, fill: c });
