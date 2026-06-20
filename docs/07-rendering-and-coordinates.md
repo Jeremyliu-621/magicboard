@@ -42,7 +42,7 @@ pointer hit-testing (clicks map to the wrong world spot). Fix already in place: 
 `syncSize()` every frame to keep `canvas.width/height == clientSize * DPR`. Don't remove it.
 
 ## Performance & the pose cache
-- Target 60fps with headroom (the CV/AR future needs the budget). Two fighters of rough strokes are
+- Target 60fps with headroom (the live AI pipeline + many drawn entities need the budget). Two fighters of rough strokes are
   cheap; the game currently **direct-renders** each frame.
 - `DS.draw.getCached(key, w, h, renderFn)` renders a drawing into an **offscreen canvas once** and
   blits it thereafter (LRU-capped). It exists for when many fighters/overlays are on screen (the AR

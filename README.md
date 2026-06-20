@@ -3,8 +3,9 @@
 A hand-drawn 2D platform fighter (Super Smash Bros–inspired) rendered in a charcoal
 "soft marker" doodle style. Vanilla HTML5 Canvas + JavaScript — **no build, no deps**.
 
-See [GOAL.md](GOAL.md) for the project's north star (it's built to become a CV/AR layer
-where real-world platforms detected from a camera get fighters composited on top).
+See [GOAL.md](GOAL.md) for the project's north star: a **live creation game** where players draw
+characters, weapons, and hazards on an iPad and an AI pipeline injects them — refined and
+functional — into a projected match in real time. Runtime design: [docs/13](docs/13-ai-pipeline.md).
 
 **Working on this?** Read [`docs/`](docs/) first — especially
 [`docs/02-aesthetic-rules.md`](docs/02-aesthetic-rules.md), the visual contract that keeps the
@@ -99,11 +100,14 @@ use **Export/Import** to move setups between machines.
 | `js/editor.js` | The editor tab. |
 | `js/main.js` | Canvas/DPR sizing, tabs, frame loop. |
 
-## Notes toward the CV/AR future
+## Notes toward the AI creation pipeline
 
-- **Stage geometry is plain data** (`data.stage.platforms` = rectangles). A computer-vision
-  module can later *generate* that array from detected real-world surfaces and feed the exact
-  same game — the seam is intentional.
-- **Rendering is isolated** behind `draw.js`; `draw.getCached()` already pose-caches to
-  offscreen canvases so per-frame cost stays low when many fighters/overlays are on screen.
-  A WebGL/AR-compositing backend can replace the Canvas2D calls without touching game logic.
+- **Skin / stage / mechanic data is plain and serializable.** AI-generated content (vector strokes,
+  `data.stage.platforms` rectangles, mechanic specs) flows through the same seams the editor uses, so
+  the drawing pipeline, agents, and the editor all produce the data the game reads. See
+  [docs/13](docs/13-ai-pipeline.md).
+- **Rendering is isolated** behind `draw.js`; `draw.getCached()` pose-caches to offscreen canvases so
+  per-frame cost stays low when many drawn entities are on screen.
+- **(Optional, far-future)** a computer-vision module could also generate `data.stage.platforms` from
+  detected real-world surfaces through the same seam — a nicety, not the goal. See
+  [docs/08](docs/08-roadmap-and-cv-ar.md).

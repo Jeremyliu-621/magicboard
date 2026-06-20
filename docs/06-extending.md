@@ -52,6 +52,7 @@ Moves are data + a tiny bit of fighter wiring.
   Special upgrade adds `projectile` to old saves while keeping drawings). Prefer this when users may
   have content worth keeping.
 
-## A note on the CV/AR direction
-When wiring computer vision, **write into `data.stage.platforms`** (rectangles) and let the existing
-game render/play unchanged. Keep the detector behind the same seam the editor uses. See `08`.
+## A note on stage-geometry producers
+The editor, the agentic level editor, and (optionally, far-future) a computer-vision detector all
+**write into `data.stage.platforms`** (rectangles) and let the existing game render/play unchanged.
+Keep every producer behind that one seam. See `08`; the AI creation pipeline is in `13`.
