@@ -1,3 +1,16 @@
 .DS_Store
 node_modules/
 *.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# CAELLUM generated artifacts (compiled models + datasets are NOT source)
+caellum_neuron/
+train_out/
+data/caellum_teacher/
+data/caellum_pairs/
+*.neuron
+*.safetensors

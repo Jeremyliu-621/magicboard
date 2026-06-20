@@ -1,0 +1,26 @@
+# CAELLUM — Neuron box (AWS workshop inf2 / Code Editor) pip deps for COMPILE + SERVE.
+#
+# ENV: the AWS Neuron workshop / inf2 instance ONLY. No CUDA. Installed on top of
+# the workshop's existing Neuron SDK by setup_neuron.sh.
+#
+# IMPORTANT: torch-neuronx, neuronx-cc, torch_xla, libneuronxla and the aws-neuronx-*
+# runtime/tools come PRE-INSTALLED from the workshop DLAMI/SDK. We do NOT pin or
+# reinstall them here — doing so can break the matched runtime/compiler/driver set.
+# `pip install -r` this file with the Neuron pip index already configured by the env.
+#
+# Pins are conservative-recent and chosen to match the optimum-neuron release line
+# that supports NeuronStableDiffusion(XL)ControlNetPipeline + lora_model_ids +
+# inline_weights_to_neff. If a pin conflicts with the workshop's Neuron SDK, relax
+# the upper bound rather than the SDK (see RUNBOOK-image.md).
+
+optimum-neuron==0.0.28        # provides the Neuron Stable Diffusion / ControlNet pipelines + optimum-cli export neuron
+diffusers==0.31.0             # pulled in transitively by optimum-neuron; pinned for reproducible compile graphs
+transformers==4.43.4          # kept within optimum-neuron's supported range
+accelerate==0.33.0            # model loading / device map helpers used during from_pretrained
+controlnet-aux==0.0.9         # scribble / canny preprocessors for the control image (serve side)
+rembg==2.0.59                 # background removal -> RGBA sprite (serve side)
+fastapi==0.111.1              # /enhance + /healthz HTTP app (serve side)
+uvicorn==0.30.5               # ASGI server for serve.py
+pillow==10.4.0                # PNG decode/encode, image resize to SHAPE
+numpy==1.26.4                 # array glue between PIL / controlnet-aux / rembg (numpy<2 for Neuron-stack compat)
+onnxruntime==1.18.1           # rembg's U2Net inference backend (CPU); pin to avoid surprise major bumps
