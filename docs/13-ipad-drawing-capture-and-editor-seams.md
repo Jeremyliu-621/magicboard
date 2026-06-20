@@ -1,10 +1,12 @@
 # Drawing Capture And Editor Seams
 
-This document replaces the old standalone iPad persistence framing. The drawing client and backend are useful plumbing, but the product direction is a visual creation phase layered over the actual Doodle Smash level structure.
+This document replaces the old standalone iPad persistence framing. The drawing client and backend are useful plumbing, but the product direction is a required visual creation phase layered over the actual Doodle Smash level structure.
 
 ## Correct Mental Model
 
-The drawing is not the level editor by itself. It is visual intent captured over a static game-stage reference. The system should store the drawing, derive game-friendly projection data, ask clarifying questions, and eventually produce typed game patches.
+The drawing is not the level editor by itself. It is visual intent captured over a static game-stage reference. The system should store the drawing, derive game-friendly projection data, ask clarifying questions, validate the draft world, and eventually produce typed game patches.
+
+The desktop entry point should become the Game Library. If there are no worlds, the primary action is "Create your first game". For now, a level and a game world are the same thing: one Smash-style Doodle Smash level. Play should be blocked until the selected world has at least one platform, two spawn points, and required characters.
 
 Phase 1 must render drawings in the game scene without mutating game data.
 

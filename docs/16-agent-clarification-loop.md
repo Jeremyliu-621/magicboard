@@ -1,14 +1,16 @@
 # Agent Clarification Loop
 
-The clarification agent sits between raw drawings and game patches. Its job is to understand intent, not to silently mutate the game.
+The clarification agent sits between raw world drawings and game patches. Its job is to help a draft become a valid Doodle Smash-style world, not to silently mutate the game.
 
 ## Inputs
 
+- World ID.
 - Room ID.
 - Capture version.
 - Canonical drawing snapshot.
 - Derived projection data.
-- Current map/mode context.
+- Current world name/status.
+- Current map/mode context, if selected.
 - Natural-language user brief.
 - Current capability contract.
 
@@ -18,8 +20,15 @@ The clarification agent sits between raw drawings and game patches. Its job is t
 - Accept/reject/ask classification.
 - Clarifying questions.
 - User answers.
+- Validation status.
 - Scene plan.
 - Later, an approved patch proposal.
+
+Initial world validity requires:
+
+- at least one platform;
+- two spawn points;
+- required characters.
 
 ## Candidate Types
 
@@ -51,11 +60,11 @@ Example: "make water physics" is not currently supported.
 
 Good questions:
 
-- "Should this platform be solid or pass-through?"
-- "Should these circles behave like Gem Grab collectibles or just decoration?"
+- "Should this platform be solid, pass-through, or bouncy?"
+- "Should this circle be a spawn point?"
 - "Should this curved bridge be approximated with rectangles?"
-- "Is this drawing a character, decoration, or hazard?"
-- "Which mode should this level use: Smash, Gem Grab, King of the Hill, or K.O. Rush?"
+- "Is this drawing Player 1, Player 2, decoration, or a hazard?"
+- "Should this object hurt players or just sit in the background?"
 
 Bad questions:
 
@@ -68,7 +77,9 @@ Bad questions:
 Before patching, the agent should produce a scene plan:
 
 - title/name;
-- selected mode;
+- validation status;
+- missing requirements;
+- selected mode, if known;
 - map target;
 - platforms and gimmicks;
 - spawns;
@@ -80,7 +91,8 @@ Before patching, the agent should produce a scene plan:
 
 The user must approve the scene plan before Phase 3 patching.
 
+Questions should appear on the iPad/draw-client creation surface because that is the authoring surface. Voice may be added later if latency is acceptable, but quick tap choices should remain available.
+
 ## Version Safety
 
 Questions and answers must reference the capture/projection version they came from. If the drawing changes after questions are generated, answers should not silently apply to stale candidates.
-

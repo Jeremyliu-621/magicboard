@@ -1,6 +1,6 @@
 # Creation Patch Contract
 
-This is the proposed contract for Phase 3. It is intentionally domain-specific. Do not use arbitrary JSON Patch or generated JavaScript for game edits.
+This is the proposed contract for Phase 3, when approved valid world drafts become playable game data. It is intentionally domain-specific. Do not use arbitrary JSON Patch or generated JavaScript for game edits.
 
 ## Patch Principles
 
@@ -15,8 +15,9 @@ This is the proposed contract for Phase 3. It is intentionally domain-specific. 
 
 ```json
 {
-  "type": "magicboard_scene_patch",
+  "type": "magicboard_world_patch",
   "version": 1,
+  "worldId": "world-untitled-1",
   "roomId": "demo",
   "captureVersion": 12,
   "target": {
@@ -69,6 +70,8 @@ Every patch application should check:
 - platform width/height are positive and reasonable;
 - `kind` is supported;
 - portal pairs are linked;
+- spawn requirements are satisfied;
+- required characters are present or explicitly assigned to defaults;
 - settings are within playable ranges;
 - operation references current capture/session version or requests confirmation.
 
@@ -84,4 +87,3 @@ The eventual browser facade should roughly follow this flow:
 6. report success/failure.
 
 The facade should reject unknown operations rather than guessing.
-

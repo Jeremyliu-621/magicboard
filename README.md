@@ -28,7 +28,7 @@ Open that URL, hit **≡ Menu → Players** for the QR, and point a phone at it.
 any Node host (with HTTPS) for play across the internet. Full details: [docs/11](docs/11-online-controllers.md).
 (The game itself still runs from `file://` with the keyboard — the server is only for phone controllers.)
 
-Optional URL hashes (handy for testing/demos):
+Optional URL hashes (handy for testing/demos; not the long-term product entry point):
 - `index.html#play` — jump straight into a match
 - `index.html#demo` — attract-mode: two AI fighters battle on their own
 - `index.html#editor` — open the editor (`#editor-stage`, `#editor-settings` for sub-tabs)

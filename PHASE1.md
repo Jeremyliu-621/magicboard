@@ -272,15 +272,17 @@ Draw on iPad. The laptop game canvas should update.
 - Projection is visual only. It does not become platforms or characters yet.
 - The static reference currently tracks the default editable Meadow platform layout; later phases can add map/stage selection.
 - The game overlay renders strokes, boxes/ellipses, and labels; it does not interpret meaning.
-- Phase 2 must build the clarification agent and candidate model.
+- Phase 1.5 must add the Game Library, multiple world records, and the required creation entry before play.
 
 ## Next Phase
 
-Phase 2 should add the clarification agent loop:
+Phase 1.5 should add the world-library creation flow:
 
-1. Read latest capture/projection.
-2. Extract candidate objects.
-3. Ask bounded questions.
-4. Track answers against capture version.
-5. Produce a scene plan.
-6. Do not patch game data yet.
+1. Desktop opens to the Game Library instead of direct play.
+2. Empty library shows "Create your first game".
+3. New worlds get default `Untitled N` names.
+4. Store multiple world records with capture/projection data.
+5. Show drawn thumbnails in the library.
+6. Block play until the world has at least one platform, two spawn points, and required characters.
+7. Add `Edit Level` to reopen the iPad/draw-client canvas.
+8. Leave `Live Edit` disabled or inert until later.
