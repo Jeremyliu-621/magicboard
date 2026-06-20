@@ -786,29 +786,21 @@
   // a lintel that ROTATES to sit flush against the (possibly tilted) underside it holds up.
   function drawPillar(ctx, it) {
     const rnd = DS.makeRng(it.seed), h = it.botY - it.topY, cx = it.x, topY = it.topY, botY = it.botY, tilt = it.tilt || 0;
-    const wt = it.thin ? 9 : 15, wb = it.thin ? 12 : 20; // half-widths: slim stilt vs chunky pier
-    D.strokePts(ctx, [[cx - wt, topY + 6], [cx - wb, botY], [cx + wb, botY], [cx + wt, topY + 6]],
-      { width: 4.5, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 }); // vertical shaft
-    ctx.globalAlpha = 0.5;
-    D.line(ctx, cx, topY + 12, cx, botY - 7, { width: 2, color: SCN, passes: 1 });
-    const courses = Math.max(1, Math.round(h / 130));
-    for (let i = 1; i <= courses; i++) { const y = topY + 6 + ((h - 6) * i) / (courses + 1); D.line(ctx, cx - wt * 0.8, y, cx + wt * 0.8, y, { width: 2, color: SCN, rnd, passes: 1 }); }
-    ctx.globalAlpha = 1;
-    if (!it.thin && h > 230) { // chunky tall pier → a couple of little arched windows (a tower leg)
+    const w = it.thin ? 5 : 8; // half the gap between the two uprights — CONSTANT (no taper, no fill)
+    // the shaft is just two straight parallel lines running up
+    D.line(ctx, cx - w, topY + 2, cx - w, botY, { width: 3, color: SCN, rnd, passes: 1 });
+    D.line(ctx, cx + w, topY + 2, cx + w, botY, { width: 3, color: SCN, rnd, passes: 1 });
+    // a couple of little arched windows between the uprights on a chunky tall pier (a tower leg)
+    if (!it.thin && h > 230) {
       const wins = Math.min(3, Math.floor(h / 170));
       for (let i = 0; i < wins; i++) {
-        const wy = topY + 46 + (h - 92) * (i / Math.max(1, wins - 1 || 1)) * (wins > 1 ? 1 : 0) + (wins === 1 ? (h - 92) * 0.4 : 0);
-        D.strokePts(ctx, [[cx - 6, wy + 9], [cx - 6, wy - 3], [cx, wy - 11], [cx + 6, wy - 3], [cx + 6, wy + 9]], { width: 2.4, color: SCN, rnd, passes: 1 });
+        const wy = topY + 46 + (h - 92) * (wins === 1 ? 0.4 : i / (wins - 1));
+        D.strokePts(ctx, [[cx - 5, wy + 8], [cx - 5, wy - 3], [cx, wy - 10], [cx + 5, wy - 3], [cx + 5, wy + 8]], { width: 2.2, color: SCN, rnd, passes: 1 });
       }
     }
-    ctx.save(); ctx.translate(cx, botY); ctx.rotate(it.botTilt || 0); // footing flush to the surface it rests on
-    D.strokePts(ctx, [[-wb - 7, 0], [wb + 7, 0], [wb + 2, -9], [-wb - 2, -9]],
-      { width: 4, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 });
-    ctx.restore();
-    ctx.save(); ctx.translate(cx, topY); ctx.rotate(tilt); // capital flush to the underside slope
-    D.strokePts(ctx, [[-wt - 6, 0], [wt + 6, 0], [wt + 2, 11], [-wt - 2, 11]],
-      { width: 4, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 });
-    ctx.restore();
+    // a short lintel flush to the underside above, and a short footing on the surface below
+    ctx.save(); ctx.translate(cx, topY); ctx.rotate(tilt); D.line(ctx, -w - 3, 0, w + 3, 0, { width: 3, color: SCN, rnd, passes: 1 }); ctx.restore();
+    ctx.save(); ctx.translate(cx, botY); ctx.rotate(it.botTilt || 0); D.line(ctx, -w - 4, 0, w + 4, 0, { width: 3.5, color: SCN, rnd, passes: 1 }); ctx.restore();
   }
 
   // a jagged island underside: the upper edge FOLLOWS the platform's underside (so it tilts/curves
