@@ -337,10 +337,12 @@
     const visL = i === 0 ? 0 : i * colW + slant, visR = i === n - 1 ? lw : (i + 1) * colW + slant, innerW = visR - visL;
     ctx.save();
     ctx.beginPath(); ctx.moveTo(lt, 0); ctx.lineTo(rt, 0); ctx.lineTo(rb, lh); ctx.lineTo(lb, lh); ctx.closePath(); ctx.clip();
-    // background: paper + a player-colour wash (stronger toward the bottom) + a few ember sparks
-    ctx.globalAlpha = a; ctx.fillStyle = D.COL.paper; ctx.fillRect(lt - 10, 0, (rt - lt) + 320, lh);
+    // background: paper + a player-colour wash (stronger toward the bottom) + a few ember sparks.
+    // fill the FULL canvas (the clip already limits it to this column's parallelogram) — a narrow
+    // rect would miss the slanted bottom corner and leave an unfilled wedge along the divider.
+    ctx.globalAlpha = a; ctx.fillStyle = D.COL.paper; ctx.fillRect(0, 0, lw, lh);
     const g = ctx.createLinearGradient(0, 0, 0, lh); g.addColorStop(0, D.mix(D.COL.paper, col, 0.05)); g.addColorStop(1, D.mix(D.COL.paper, col, 0.26));
-    ctx.fillStyle = g; ctx.fillRect(lt - 10, 0, (rt - lt) + 320, lh);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, lw, lh);
     const er = DS.makeRng(f.pIndex * 31 + 7); ctx.fillStyle = col;
     for (let k = 0; k < 12; k++) { ctx.globalAlpha = a * (0.12 + er() * 0.18); const ex = lt + er() * (rt - lt), ey = hb + er() * (lh - hb), es = 1.5 + er() * 3; ctx.beginPath(); ctx.arc(ex, ey, es, 0, 7); ctx.fill(); }
     ctx.globalAlpha = a;
