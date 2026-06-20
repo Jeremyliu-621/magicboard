@@ -1,0 +1,1 @@
+"""Magic Board backend package."""
