@@ -585,11 +585,44 @@
     }
     return r > l ? { l, r } : null;
   }
-  function addHang(front, pb, x0, x1, density, seed) {
+  // world-space underside contour of a platform — the drawn stroke's ACTUAL bottom edge (so the
+  // dressing follows a tilted/curved platform), or a flat line under a plain rectangle.
+  function undersideContour(p) {
+    if (p.kind === 'drawn' && p.pts && p.pts.length > 1) {
+      const bot = offsetAlongNormal(p.pts, DRAWN_TH);
+      return bot.map((b) => [p.x + b[0], p.y + b[1]]);
+    }
+    const pb = p.y + p.h;
+    return [[p.x, pb], [p.x + p.w, pb]];
+  }
+  // underside point at world x: the LOWEST y where the contour spans x, plus the local surface tilt
+  // (radians, normalised to [-90°,90°]) so a support's capital can sit flush. null if x is outside.
+  function undersideAt(contour, x) {
+    let y = null, tilt = 0;
+    for (let i = 0; i < contour.length - 1; i++) {
+      const a = contour[i], b = contour[i + 1];
+      if (x < Math.min(a[0], b[0]) - 0.01 || x > Math.max(a[0], b[0]) + 0.01) continue;
+      const dx = b[0] - a[0], t = Math.abs(dx) < 1e-6 ? 0 : (x - a[0]) / dx;
+      const yy = a[1] + (b[1] - a[1]) * t;
+      if (y === null || yy > y) {
+        y = yy; let ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+        if (ang > Math.PI / 2) ang -= Math.PI; else if (ang < -Math.PI / 2) ang += Math.PI;
+        tilt = ang;
+      }
+    }
+    return y === null ? null : { y, tilt };
+  }
+  // sample the underside across x0..x1 into a short polyline (used as an island's upper edge)
+  function undersideStrip(contour, x0, x1) {
+    const steps = Math.max(2, Math.round(Math.abs(x1 - x0) / 44)), out = [], y0 = contour[0][1];
+    for (let i = 0; i <= steps; i++) { const x = x0 + (x1 - x0) * (i / steps), u = undersideAt(contour, x); out.push([x, u ? u.y : y0]); }
+    return out;
+  }
+  function addHang(front, contour, x0, x1, density, seed) {
     const n = Math.max(1, Math.min(3, Math.round(((x1 - x0) / 200) * density)));
     for (let i = 0; i < n; i++) {
-      const x = x0 + (x1 - x0) * (n === 1 ? 0.5 : i / (n - 1));
-      front.push({ t: 'hang', x, y: pb - 6, kind: pick(DS.makeRng(seed + i * 13), HANG_KINDS), seed: seed + i * 13 });
+      const x = x0 + (x1 - x0) * (n === 1 ? 0.5 : i / (n - 1)), u = undersideAt(contour, x);
+      front.push({ t: 'hang', x, y: (u ? u.y : contour[0][1]) - 6, kind: pick(DS.makeRng(seed + i * 13), HANG_KINDS), seed: seed + i * 13 });
     }
   }
 
@@ -604,28 +637,32 @@
       const pb = p.y + p.h, pr = p.x + p.w;
       const isBase = !p.pass && p.h >= 100 && pb >= floorBottom - 40; // a ground slab resting on the floor
       // ---- underside: island / pillars / overhang edges (skip the base ground) ----
+      // everything anchors to the platform's real underside CONTOUR, so it follows a tilt/curve.
       if (!isBase) {
+        const contour = undersideContour(p);
         const sp = supportSpan(plats, p);
         if (!sp) {
-          // truly floating → a jagged island underside, with a little foliage off it
-          behind.push({ t: 'island', x0: p.x, x1: pr, y: pb, depth: Math.min(150, Math.max(46, p.w * 0.4)), seed: seed + 1 });
-          addHang(front, pb, p.x + p.w * 0.28, p.x + p.w * 0.72, density, seed + 2);
+          // truly floating → a jagged island that follows the (possibly tilted) underside + foliage
+          behind.push({ t: 'island', top: undersideStrip(contour, p.x, pr), depth: Math.min(150, Math.max(46, p.w * 0.4)), seed: seed + 1 });
+          addHang(front, contour, p.x + p.w * 0.28, p.x + p.w * 0.72, density, seed + 2);
         } else {
           const l = Math.max(p.x, sp.l), r = Math.min(pr, sp.r), span = r - l;
-          // pillars near the ends of the supported span (one if narrow); each lands on whatever's under it
+          // pillars near the ends of the supported span (one if narrow); each rises to the slanted
+          // underside above it (so a tilted platform gets uneven-length, angle-capped supports).
           const inset = Math.min(50, span * 0.24);
           const xs = span < 150 ? [(l + r) / 2] : [l + inset, r - inset];
           if (span > 560 && density >= 1) xs.splice(1, 0, (l + r) / 2);
           for (let i = 0; i < xs.length; i++) {
-            const x = xs[i], sup = surfaceBelow(plats, x, pb + 2, p), gap = sup - pb;
+            const x = xs[i], u = undersideAt(contour, x), topY = u ? u.y : pb, tilt = u ? u.tilt : 0;
+            const sup = surfaceBelow(plats, x, topY + 2, p), gap = sup - topY;
             if (sup !== Infinity && gap > GAP_MIN && gap < PILLAR_MAX) {
-              behind.push({ t: 'pillar', x, topY: pb, botY: sup, thin: !!p.pass, seed: seed + 10 + i * 7 });
+              behind.push({ t: 'pillar', x, topY, botY: sup, tilt, thin: !!p.pass, seed: seed + 10 + i * 7 });
               if (density >= 0.5 && i < 2) front.push({ t: 'plant', x, y: sup, kind: pick(DS.makeRng(seed + 20 + i), TOP_KINDS), s: 0.78, seed: seed + 20 + i });
             }
           }
-          // overhangs → a jagged island edge (and foliage) on each jutting side
-          if (l - p.x > 50) { behind.push({ t: 'island', x0: p.x, x1: l + 8, y: pb, depth: Math.min(96, (l - p.x) * 0.7), seed: seed + 31 }); addHang(front, pb, p.x + 8, l - 8, density, seed + 32); }
-          if (pr - r > 50) { behind.push({ t: 'island', x0: r - 8, x1: pr, y: pb, depth: Math.min(96, (pr - r) * 0.7), seed: seed + 41 }); addHang(front, pb, r + 8, pr - 8, density, seed + 42); }
+          // overhangs → a jagged island edge (and foliage) on each jutting side, following the underside
+          if (l - p.x > 50) { behind.push({ t: 'island', top: undersideStrip(contour, p.x, l + 8), depth: Math.min(96, (l - p.x) * 0.7), seed: seed + 31 }); addHang(front, contour, p.x + 8, l - 8, density, seed + 32); }
+          if (pr - r > 50) { behind.push({ t: 'island', top: undersideStrip(contour, r - 8, pr), depth: Math.min(96, (pr - r) * 0.7), seed: seed + 41 }); addHang(front, contour, r + 8, pr - 8, density, seed + 42); }
         }
       }
       // ---- a few varied plants ON TOP (any non-gimmick platform) ----
@@ -641,34 +678,36 @@
     return { behind, front };
   }
 
-  // a support pillar/stilt: a tapered paper column with a capital + base footing + faint courses.
+  // a support pillar/stilt: a vertical tapered paper column dropping to the surface below, capped by
+  // a lintel that ROTATES to sit flush against the (possibly tilted) underside it holds up.
   function drawPillar(ctx, it) {
-    const rnd = DS.makeRng(it.seed), h = it.botY - it.topY, cx = it.x, topY = it.topY, botY = it.botY;
+    const rnd = DS.makeRng(it.seed), h = it.botY - it.topY, cx = it.x, topY = it.topY, botY = it.botY, tilt = it.tilt || 0;
     const wt = it.thin ? 9 : 15, wb = it.thin ? 12 : 20; // half-widths: slim stilt vs chunky pier
-    D.strokePts(ctx, [[cx - wt - 6, topY], [cx + wt + 6, topY], [cx + wt + 2, topY + 10], [cx - wt - 2, topY + 10]],
-      { width: 4, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 }); // capital
-    D.strokePts(ctx, [[cx - wt, topY + 8], [cx - wb, botY], [cx + wb, botY], [cx + wt, topY + 8]],
-      { width: 4.5, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 }); // shaft
+    D.strokePts(ctx, [[cx - wt, topY + 6], [cx - wb, botY], [cx + wb, botY], [cx + wt, topY + 6]],
+      { width: 4.5, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 }); // vertical shaft
     ctx.globalAlpha = 0.5;
-    D.line(ctx, cx, topY + 14, cx, botY - 7, { width: 2, color: SCN, passes: 1 });
+    D.line(ctx, cx, topY + 12, cx, botY - 7, { width: 2, color: SCN, passes: 1 });
     const courses = Math.max(1, Math.round(h / 130));
-    for (let i = 1; i <= courses; i++) { const y = topY + (h * i) / (courses + 1); D.line(ctx, cx - wt * 0.8, y, cx + wt * 0.8, y, { width: 2, color: SCN, rnd, passes: 1 }); }
+    for (let i = 1; i <= courses; i++) { const y = topY + 6 + ((h - 6) * i) / (courses + 1); D.line(ctx, cx - wt * 0.8, y, cx + wt * 0.8, y, { width: 2, color: SCN, rnd, passes: 1 }); }
     ctx.globalAlpha = 1;
     D.strokePts(ctx, [[cx - wb - 7, botY], [cx + wb + 7, botY], [cx + wb + 2, botY - 9], [cx - wb - 2, botY - 9]],
       { width: 4, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 }); // base footing
+    ctx.save(); ctx.translate(cx, topY); ctx.rotate(tilt); // capital flush to the underside slope
+    D.strokePts(ctx, [[-wt - 6, 0], [wt + 6, 0], [wt + 2, 11], [-wt - 2, 11]],
+      { width: 4, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 });
+    ctx.restore();
   }
 
-  // a jagged island underside: the top edge sits flush under the platform; the bottom juts into
-  // sharp points (deepest toward the middle), like a chunk of floating rock.
+  // a jagged island underside: the upper edge FOLLOWS the platform's underside (so it tilts/curves
+  // with it); the belly juts into sharp points, deepest toward the middle, like a chunk of rock.
   function drawIsland(ctx, it) {
-    const rnd = DS.makeRng(it.seed), w = it.x1 - it.x0, y = it.y, depth = it.depth || Math.min(140, w * 0.45);
-    const steps = Math.max(2, Math.round(w / 80)), pts = [[it.x0, y]];
-    for (let i = 1; i < steps; i++) {
-      const t = i / steps, x = it.x0 + w * t;
-      const dy = depth * Math.sin(t * Math.PI) * (i % 2 ? 1 : 0.55) * (0.7 + 0.45 * rnd()); // jagged dips
-      pts.push([x, y + dy]);
+    const rnd = DS.makeRng(it.seed), top = it.top, n = top.length, depth = it.depth || 80;
+    const pts = top.slice(); // upper edge = the underside contour, left → right
+    for (let i = n - 1; i >= 0; i--) {                 // belly, right → left, hanging below each top point
+      const t = n === 1 ? 0 : i / (n - 1);
+      const dy = depth * Math.sin(t * Math.PI) * (i % 2 ? 1 : 0.55) * (0.7 + 0.45 * rnd());
+      pts.push([top[i][0], top[i][1] + dy]);
     }
-    pts.push([it.x1, y]);
     D.strokePts(ctx, pts, { width: 4, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 });
   }
 
