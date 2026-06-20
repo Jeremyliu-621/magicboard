@@ -312,32 +312,29 @@ def build_app():
             "shape": config.SHAPE,
         }
 
+    # Body model — FastAPI parses + validates the JSON into this. We use an explicit Pydantic
+    # model instead of a raw `request: Request` because some FastAPI/Pydantic versions mis-read
+    # the raw Request as a required *query* param -> a 422 on every POST (loc:["query","request"]).
+    from pydantic import BaseModel
+
+    class EnhanceRequest(BaseModel):
+        image_b64: str
+        label: str = "thing"
+        steps: Optional[int] = None
+        strength: Optional[float] = None
+
     @app.post(config.ENHANCE_ENDPOINT)
-    async def enhance(request: Request):
-        # Parse JSON manually so a malformed body becomes a clean JSON error, not a 422 stack.
-        try:
-            body = await request.json()
-        except Exception:
-            return JSONResponse(status_code=400, content={"error": "request body must be JSON"})
-        if not isinstance(body, dict):
-            return JSONResponse(status_code=400, content={"error": "request body must be a JSON object"})
-
-        image_b64 = body.get("image_b64")
-        label = body.get("label")
-        steps = body.get("steps")
-        strength = body.get("strength")
-
-        if not isinstance(image_b64, str) or not image_b64:
+    async def enhance(body: EnhanceRequest):
+        if not body.image_b64:
             return JSONResponse(status_code=400, content={"error": "image_b64 (base64 PNG string) is required"})
-
         try:
-            out = enhance_bytes(image_b64, label, steps=steps, strength=strength)
+            out = enhance_bytes(body.image_b64, body.label, steps=body.steps, strength=body.strength)
             return JSONResponse(content=out)
         except ValueError as exc:
-            # Bad client input.
+            # Bad client input (e.g. an undecodable image).
             return JSONResponse(status_code=400, content={"error": str(exc)})
         except Exception as exc:
-            # Anything else (inference failure, OOM, etc.) -> 500 JSON, full trace to logs.
+            # Anything else (inference failure, OOM, ...) -> 500 JSON, full trace to logs.
             traceback.print_exc()
             return JSONResponse(status_code=500, content={"error": f"enhance failed: {exc}"})
 
