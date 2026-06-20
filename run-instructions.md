@@ -1,6 +1,6 @@
 # Run Instructions
 
-These commands run the current Phase 1 creation bridge: draw over a Doodle Smash reference in the draw client, and see that drawing as a non-mutating overlay on the existing Doodle Smash game canvas.
+These commands run the current Phase 1 creation bridge: draw over a Doodle Smash reference in the draw client, and see that drawing as non-mutating, world-anchored scene annotation in the existing Doodle Smash game.
 
 Phase 1 target note: the draw client reference is a static, platform-only, fixed-camera view. It does not show a second live match with its own timer, fighters, or dynamic camera.
 
@@ -82,6 +82,7 @@ If Vite says it used another port, use that port instead.
 
 Draw inside the orange 1920 x 1080 game frame. Your drawing should appear over the laptop game canvas.
 The reference inside the drawing frame is the static platform-only level view so you can align your drawing with the actual platforms.
+In the laptop game, the drawing should stay attached to those scene coordinates as the camera pans or zooms.
 
 Inspect backend capture state:
 

@@ -13,10 +13,10 @@ The user journey:
 3. Drawing surface displays only gameplay-relevant platforms in a fixed 1920 x 1080 frame.
 4. User draws rough platforms, character ideas, arrows, labels, or gameplay notes over that static reference.
 5. Backend stores the canonical drawing and a derived projection.
-6. Laptop game renders the projection as an overlay.
+6. Laptop game renders the projection in the scene's world layer, so it moves with camera pan/zoom.
 7. No game data is mutated.
 
-Phase 1 proves spatial communication. It is successful when the user can draw on top of a stable platform reference and see the drawing aligned over the laptop game canvas.
+Phase 1 proves spatial communication. It is successful when the user can draw on top of a stable platform reference and see the drawing aligned with the laptop game scene, attached to the same world coordinates as the platforms.
 
 The iPad reference should not be a second live match. It should not show timers, fighters, effects, projectiles, countdown, HUD, or dynamic camera movement.
 

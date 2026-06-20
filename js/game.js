@@ -688,6 +688,7 @@
       DS.stage.drawBackground(ctx, this.stage, cam, home);
       this._renderBlastBorder(ctx);
       DS.stage.drawStage(ctx, this.stage, cam, home);
+      if (DS.CreateOverlay) DS.CreateOverlay.renderView(ctx, this);
       if (this.mode.renderWorld) this.mode.renderWorld(this, ctx);
       for (const f of this.fighters) f.render(ctx, this.world);
       this._renderProjectiles(ctx);
@@ -701,7 +702,6 @@
       ctx.save();
       ctx.translate(this.ox, this.oy);
       ctx.scale(this.scale, this.scale);
-      if (DS.CreateOverlay) DS.CreateOverlay.renderView(ctx, this);
       this._hud(ctx);
       this._overlay(ctx);
       if (DS.CreateOverlay) DS.CreateOverlay.renderHud(ctx, this);

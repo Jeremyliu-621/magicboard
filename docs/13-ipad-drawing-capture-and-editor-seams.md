@@ -6,7 +6,7 @@ This document replaces the old standalone iPad persistence framing. The drawing 
 
 The drawing is not the level editor by itself. It is visual intent captured over a static game-stage reference. The system should store the drawing, derive game-friendly projection data, ask clarifying questions, and eventually produce typed game patches.
 
-Phase 1 must only render drawings over the game canvas. It should not mutate game data.
+Phase 1 must render drawings in the game scene without mutating game data.
 
 The iPad/browser reference for Phase 1 should be static and platform-only. It should use the game's 1920 x 1080 view-space coordinate system without a live match simulation, dynamic camera, fighters, timer, HUD, projectiles, particles, or countdown state.
 
@@ -92,7 +92,7 @@ Projection data should include:
 - tool/color/style metadata;
 - timestamp/client metadata.
 
-The game should render projection data as a non-mutating overlay. It should not write to `DS.Store.data` until a later approved patch phase.
+The game should render projection data in the world layer, under the active camera transform, so drawings stay attached to authored scene coordinates as the camera pans or zooms. It should not write to `DS.Store.data` until a later approved patch phase.
 
 ## Later Conversion Boundary
 

@@ -2,7 +2,7 @@
 
 Phase 1 uses a static, platform-only reference layer instead of embedding a second live Doodle Smash match.
 
-The goal is for the iPad/browser drawing surface to have a fixed 1920 x 1080 coordinate frame with only the current level's gameplay platforms visible behind the drawing layer. The laptop game still receives the drawing as a live, non-mutating overlay.
+The goal is for the iPad/browser drawing surface to have a fixed 1920 x 1080 coordinate frame with only the current level's gameplay platforms visible behind the drawing layer. The laptop game still receives the drawing as live, non-mutating scene annotations anchored in world space.
 
 ## What This Phase Does
 
@@ -17,9 +17,9 @@ The intended flow is:
    - canonical tldraw capture data;
    - derived game-view projection data.
 7. The backend stores the latest capture/projection for that room and broadcasts updates.
-8. The already-open game page receives the projection over WebSocket and renders it over the actual game canvas.
+8. The already-open game page receives the projection over WebSocket and renders it in the world layer over the actual game scene.
 
-Phase 1 does **not** mutate `DS.Store.data`. It is visual communication only.
+Phase 1 does **not** mutate `DS.Store.data`. It is visual communication only, but the laptop rendering is camera-aware so drawings stay attached to scene coordinates.
 
 ## Superseded Direction
 
@@ -157,7 +157,7 @@ When enabled, it:
 
 Overlay render placement:
 
-- drawing projection renders in view space, aligned to the same 1920 x 1080 coordinate frame used by the draw client;
+- drawing projection renders inside the game's world camera transform, aligned to the same 1920 x 1080 coordinate frame used by the draw client;
 - HUD status renders in the view-space HUD layer.
 
 ## Acceptance Criteria
@@ -170,7 +170,7 @@ Phase 1 should be considered complete when all of the following are true:
 - Reference layer uses fixed 1920 x 1080 view-space coordinates.
 - Reference layer has no timer, fighters, HUD, projectiles, effects, countdown, or dynamic camera.
 - User drawings align with the platform reference on the iPad/browser.
-- Same drawings appear aligned over the laptop game canvas.
+- Same drawings appear aligned over the laptop game scene and stay attached as the camera moves.
 - Backend `/rooms/{room_id}/capture` version increases after drawing.
 - The existing game remains playable with the overlay disabled.
 
