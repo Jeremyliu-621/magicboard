@@ -15,8 +15,8 @@
 # it tries to, stop and report (the SDK runtime/compiler/driver set must stay matched).
 
 optimum-neuron               # Neuron Stable Diffusion / ControlNet pipelines + optimum-cli export neuron
-diffusers                    # resolved by optimum-neuron to a compatible version
-transformers                 # resolved by optimum-neuron to a compatible version
+diffusers==0.35.*            # optimum-neuron 0.4.3 REQUIRES diffusers 0.35.x; its ControlNet pipeline fails to import on 0.38+
+transformers                 # let optimum-neuron pull its required range (~4.57 for 0.4.3)
 accelerate                   # model loading helpers used during from_pretrained
 controlnet-aux               # scribble / canny preprocessors for the control image (serve side)
 rembg                        # background removal -> RGBA sprite (serve side)
