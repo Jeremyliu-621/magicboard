@@ -101,7 +101,7 @@ The draw client now:
 - sends capture/projection over WebSocket;
 - shows status, room, backend version, room version, object count, and sync time.
 
-The game reference URL comes from `VITE_GAME_URL`, a `game` query parameter, or the default `http://localhost:8080/#play`.
+The game reference URL comes from `VITE_GAME_URL`, a `game` query parameter, or a default inferred from the current browser host on port `8080`. For example, opening the draw client at `http://10.31.151.244:5173/?room=demo` loads the game reference from `http://10.31.151.244:8080/#play`.
 
 Projection currently supports:
 
@@ -197,7 +197,7 @@ Terminal 3:
 
 ```sh
 cd /Users/chloehouvardas/Documents/CODE/berkley-2026/magicboard/draw-client
-VITE_GAME_URL=http://localhost:8080/#play npm run dev -- --host 0.0.0.0
+npm run dev -- --host 0.0.0.0
 ```
 
 Open the Vite URL it prints, usually:
@@ -229,7 +229,7 @@ Start draw client with that backend URL and game URL:
 
 ```sh
 cd /Users/chloehouvardas/Documents/CODE/berkley-2026/magicboard/draw-client
-VITE_BACKEND_URL=http://YOUR_LAPTOP_LAN_IP:8000 VITE_GAME_URL=http://YOUR_LAPTOP_LAN_IP:8080/#play npm run dev -- --host 0.0.0.0
+VITE_BACKEND_URL=http://YOUR_LAPTOP_LAN_IP:8000 npm run dev -- --host 0.0.0.0
 ```
 
 Open on iPad:

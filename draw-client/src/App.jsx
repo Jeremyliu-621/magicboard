@@ -10,7 +10,8 @@ import {
 } from 'tldraw'
 
 const DEFAULT_BACKEND_URL = 'http://localhost:8000'
-const DEFAULT_GAME_URL = 'http://localhost:8080/#play'
+const DEFAULT_GAME_PORT = '8080'
+const DEFAULT_GAME_PATH = '/#play'
 const SYNC_DEBOUNCE_MS = 120
 const RECONNECT_DELAY_MS = 1000
 const GAME_FRAME = { x: 0, y: 0, w: 1920, h: 1080 }
@@ -46,7 +47,15 @@ function getRoomId() {
 
 function getGameUrl() {
   const params = new URLSearchParams(window.location.search)
-  return params.get('game') || import.meta.env.VITE_GAME_URL || DEFAULT_GAME_URL
+  const configuredUrl = params.get('game') || import.meta.env.VITE_GAME_URL
+  if (configuredUrl) return configuredUrl
+
+  const url = new URL(window.location.href)
+  url.port = DEFAULT_GAME_PORT
+  url.pathname = '/'
+  url.search = ''
+  url.hash = DEFAULT_GAME_PATH.slice(1)
+  return url.toString()
 }
 
 function normalizeBackendUrl(rawUrl) {
@@ -219,13 +228,14 @@ function ensureStageFrame(editor) {
   editor.setCurrentTool('draw')
 }
 
-function GameSceneLayer({ gameUrl }) {
+function GameSceneLayer({ gameUrl, onSceneLoad }) {
   return (
     <iframe
       className="game-scene-frame"
       src={gameUrl}
       title="Doodle Smash scene reference"
       aria-hidden="true"
+      onLoad={onSceneLoad}
     />
   )
 }
@@ -260,10 +270,11 @@ export default function App() {
   const [roomVersion, setRoomVersion] = useState(0)
   const [lastSyncedAt, setLastSyncedAt] = useState(null)
   const [projectionCount, setProjectionCount] = useState(0)
+  const [sceneStatus, setSceneStatus] = useState('loading')
   const [error, setError] = useState('')
   const tldrawComponents = useMemo(
     () => ({
-      OnTheCanvas: () => <GameSceneLayer gameUrl={gameUrl} />,
+      OnTheCanvas: () => <GameSceneLayer gameUrl={gameUrl} onSceneLoad={() => setSceneStatus('loaded')} />,
     }),
     [gameUrl],
   )
@@ -419,7 +430,7 @@ export default function App() {
           </div>
           <div>
             <dt>Scene</dt>
-            <dd>game</dd>
+            <dd>{sceneStatus}</dd>
           </div>
           <div>
             <dt>Backend</dt>

@@ -67,7 +67,7 @@ From the repo root:
 
 ```sh
 cd draw-client
-VITE_GAME_URL=http://localhost:8080/#play npm run dev -- --host 0.0.0.0
+npm run dev -- --host 0.0.0.0
 ```
 
 Open the Vite URL it prints. Usually:
@@ -80,6 +80,7 @@ If Vite says it used another port, use that port instead.
 
 Draw inside the orange 1920 x 1080 game frame. Your drawing should appear over the laptop game canvas.
 The Doodle Smash scene should be visible inside the drawing frame so you can align your drawing with the actual level.
+By default, the draw client loads the game scene from the same host on port `8080`.
 
 Inspect backend capture state:
 
@@ -103,7 +104,7 @@ If it prints `10.31.151.244`, start the draw client like this:
 
 ```sh
 cd draw-client
-VITE_BACKEND_URL=http://10.31.151.244:8000 VITE_GAME_URL=http://10.31.151.244:8080/#play npm run dev -- --host 0.0.0.0
+VITE_BACKEND_URL=http://10.31.151.244:8000 npm run dev -- --host 0.0.0.0
 ```
 
 Open on the laptop:
