@@ -312,32 +312,32 @@ def build_app():
             "shape": config.SHAPE,
         }
 
-    # Body model — FastAPI parses + validates the JSON into this. We use an explicit Pydantic
-    # model instead of a raw `request: Request` because some FastAPI/Pydantic versions mis-read
-    # the raw Request as a required *query* param -> a 422 on every POST (loc:["query","request"]).
-    from pydantic import BaseModel
-
-    class EnhanceRequest(BaseModel):
-        image_b64: str
-        label: str = "thing"
-        steps: Optional[int] = None
-        strength: Optional[float] = None
-
-    @app.post(config.ENHANCE_ENDPOINT)
-    async def enhance(body: EnhanceRequest):
-        if not body.image_b64:
+    # This box's FastAPI mis-classifies EVERY typed handler param as a required query param
+    # (it did it to a raw `Request` AND to a Pydantic body model -> 422, loc:["query",...]) — a
+    # fastapi/pydantic version skew. Only /healthz (no params) survives. So we bypass FastAPI's
+    # parameter machinery entirely with a plain STARLETTE route: add_route passes the raw request
+    # positionally with NO type introspection, and we read the JSON body by hand.
+    async def enhance_endpoint(request):
+        try:
+            data = await request.json()
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "request body must be JSON"})
+        if not isinstance(data, dict):
+            return JSONResponse(status_code=400, content={"error": "request body must be a JSON object"})
+        image_b64 = data.get("image_b64")
+        if not isinstance(image_b64, str) or not image_b64:
             return JSONResponse(status_code=400, content={"error": "image_b64 (base64 PNG string) is required"})
         try:
-            out = enhance_bytes(body.image_b64, body.label, steps=body.steps, strength=body.strength)
+            out = enhance_bytes(image_b64, data.get("label", "thing"),
+                                steps=data.get("steps"), strength=data.get("strength"))
             return JSONResponse(content=out)
         except ValueError as exc:
-            # Bad client input (e.g. an undecodable image).
-            return JSONResponse(status_code=400, content={"error": str(exc)})
+            return JSONResponse(status_code=400, content={"error": str(exc)})  # bad client input
         except Exception as exc:
-            # Anything else (inference failure, OOM, ...) -> 500 JSON, full trace to logs.
             traceback.print_exc()
             return JSONResponse(status_code=500, content={"error": f"enhance failed: {exc}"})
 
+    app.add_route(config.ENHANCE_ENDPOINT, enhance_endpoint, methods=["POST"])
     return app
 
 
