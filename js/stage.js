@@ -798,9 +798,13 @@
         D.strokePts(ctx, [[cx - 5, wy + 8], [cx - 5, wy - 3], [cx, wy - 10], [cx + 5, wy - 3], [cx + 5, wy + 8]], { width: 2.2, color: SCN, rnd, passes: 1 });
       }
     }
-    // a short lintel flush to the underside above, and a short footing on the surface below
-    ctx.save(); ctx.translate(cx, topY); ctx.rotate(tilt); D.line(ctx, -w - 3, 0, w + 3, 0, { width: 3, color: SCN, rnd, passes: 1 }); ctx.restore();
-    ctx.save(); ctx.translate(cx, botY); ctx.rotate(it.botTilt || 0); D.line(ctx, -w - 4, 0, w + 4, 0, { width: 3.5, color: SCN, rnd, passes: 1 }); ctx.restore();
+    // little flared end-pieces: a capital flush to the underside above, a foot on the surface below
+    ctx.save(); ctx.translate(cx, topY); ctx.rotate(tilt);
+    D.strokePts(ctx, [[-w - 4, 0], [w + 4, 0], [w + 1, 8], [-w - 1, 8]], { width: 3, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 });
+    ctx.restore();
+    ctx.save(); ctx.translate(cx, botY); ctx.rotate(it.botTilt || 0);
+    D.strokePts(ctx, [[-w - 5, 0], [w + 5, 0], [w + 2, -9], [-w - 2, -9]], { width: 3, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 });
+    ctx.restore();
   }
 
   // a jagged island underside: the upper edge FOLLOWS the platform's underside (so it tilts/curves
