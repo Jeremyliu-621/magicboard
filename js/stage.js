@@ -685,7 +685,7 @@
           addHang(front, contour, p.x + p.w * 0.28, p.x + p.w * 0.72, density, seed + 2);
         } else {
           const l = Math.max(p.x, sp.l), r = Math.min(pr, sp.r), span = r - l;
-          const pillars = []; // collect pillars so we can brace between them afterwards
+          const pillars = []; // collect pillars (to add a buttress to a tall lone one afterwards)
           // drop a pillar from an anchor point (ax,ay,tilt) to the surface beneath; returns it or null
           const addPier = (ax, ay, tlt, idx, thin, plant) => {
             const sup = surfaceBelow(plats, ax, ay + 2, p);
@@ -721,16 +721,9 @@
             if (span > 560 && density >= 1) fracs.splice(1, 0, 0.5);
             for (let i = 0; i < fracs.length; i++) { const a = contourPt(contour, fracs[i]); addPier(a.x, a.y, a.tilt, i, !!p.pass, i < 2); }
           }
-          // trestle bracing between neighbouring tall pillars; a buttress for a tall lone pier
-          if (density >= 0.7) {
-            for (let k = 0; k + 1 < pillars.length; k++) {
-              const A = pillars[k], B = pillars[k + 1];
-              if (Math.abs(A.x - B.x) < 380 && Math.min(A.botY - A.topY, B.botY - B.topY) > 130)
-                behind.push({ t: 'brace', ax: A.x, bx: B.x, topY: Math.max(A.topY, B.topY), botY: Math.min(A.botY, B.botY), seed: seed + 60 + k });
-            }
-            if (pillars.length === 1 && pillars[0].botY - pillars[0].topY > 300)
-              behind.push({ t: 'buttress', x: pillars[0].x, topY: pillars[0].topY, botY: pillars[0].botY, dir: pillars[0].x < (l + r) / 2 ? 1 : -1, seed: seed + 70 });
-          }
+          // a buttress strut for a tall lone pier
+          if (density >= 0.7 && pillars.length === 1 && pillars[0].botY - pillars[0].topY > 300)
+            behind.push({ t: 'buttress', x: pillars[0].x, topY: pillars[0].topY, botY: pillars[0].botY, dir: pillars[0].x < (l + r) / 2 ? 1 : -1, seed: seed + 70 });
           // overhangs → a jagged island edge (and foliage) on each jutting side, following the underside
           if (l - p.x > 50) { behind.push({ t: 'island', top: undersideStrip(contour, p.x, l + 8), depth: Math.min(96, (l - p.x) * 0.7), seed: seed + 31 }); addHang(front, contour, p.x + 8, l - 8, density, seed + 32); }
           if (pr - r > 50) { behind.push({ t: 'island', top: undersideStrip(contour, r - 8, pr), depth: Math.min(96, (pr - r) * 0.7), seed: seed + 41 }); addHang(front, contour, r + 8, pr - 8, density, seed + 42); }
@@ -866,14 +859,6 @@
     ctx.globalAlpha = 0.4; D.curve(ctx, [[it.x0 + 4, it.y0 + it.sd], [midx, crown + 7], [it.x1 - 4, it.y1 + it.sd]], { width: 2.5, color: SCN, rnd, passes: 1 }); ctx.globalAlpha = 1;
     ctx.fillStyle = SCN; ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.arc(midx, crown - 1, 2.6, 0, 7); ctx.fill(); ctx.globalAlpha = 1; // keystone dot
   }
-  // a trestle X-brace between two neighbouring pillars, in their lower-middle band
-  function drawBrace(ctx, it) {
-    const rnd = DS.makeRng(it.seed), h = it.botY - it.topY, y0 = it.topY + h * 0.46, y1 = it.topY + h * 0.74;
-    ctx.globalAlpha = 0.55;
-    D.line(ctx, it.ax, y0, it.bx, y1, { width: 2.5, color: SCN, rnd, passes: 1 });
-    D.line(ctx, it.ax, y1, it.bx, y0, { width: 2.5, color: SCN, rnd, passes: 1 });
-    ctx.globalAlpha = 1;
-  }
   // a buttress: a wedge strut bracing a tall lone pier back to the ground
   function drawButtress(ctx, it) {
     const rnd = DS.makeRng(it.seed), h = it.botY - it.topY, sy = it.topY + h * 0.34, ex = it.x + it.dir * Math.min(130, h * 0.5);
@@ -885,7 +870,6 @@
     if (it.t === 'pillar') drawPillar(ctx, it);
     else if (it.t === 'island') drawIsland(ctx, it);
     else if (it.t === 'arch') drawArch(ctx, it);
-    else if (it.t === 'brace') drawBrace(ctx, it);
     else if (it.t === 'buttress') drawButtress(ctx, it);
   }
   // ivy climbing up a pillar, with little leaves
