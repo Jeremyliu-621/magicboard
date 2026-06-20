@@ -54,6 +54,7 @@
       const skins = this.playerSkins || [];
       this.fighters.forEach((f, i) => { if (skins[i] && skins[i].enabled) { const ch = DS.data.clone(f.ch); ch.skin = skins[i]; f.ch = ch; } });
       this.projectiles = [];
+      this.props = []; // drawn items/props (DS.Prop) injected at runtime by DS.AI
       this.cam = { cx: d.view.w / 2, cy: d.view.h / 2, zoom: 1 };
       // dev: when set (a number), force a fixed overview zoom so you can see the whole
       // arena / blast borders. null = normal dynamic camera. Toggled by keys in main.js.
@@ -328,6 +329,11 @@
       }
       this._resolveBodies();
       this._updateProjectiles(dt);
+      if (this.props) {
+        for (const prop of this.props) prop.update(dt, this.world);
+        if (DS.Prop) DS.Prop.handlePickups(this);
+        this.props = this.props.filter((p) => !p.dead);
+      }
       this.effects.update(dt);
       // mode-specific scoring & win conditions (Smash also runs the stock/timer check here)
       this.mode.update(this, dt);
@@ -636,6 +642,7 @@
       if (this.mode.renderWorld) this.mode.renderWorld(this, ctx);
       for (const f of this.fighters) f.render(ctx, this.world);
       this._renderProjectiles(ctx);
+      if (this.props) for (const prop of this.props) prop.render(ctx, this.world);
       this.effects.render(ctx);
       for (const f of this.fighters) this._marker(ctx, f);
       if (this.devBars) for (const f of this.fighters) this._devSpeedBar(ctx, f);

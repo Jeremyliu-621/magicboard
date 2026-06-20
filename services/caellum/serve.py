@@ -293,8 +293,12 @@ def build_app():
     """Construct the FastAPI app. Imported lazily so non-serve tooling can import this module."""
     from fastapi import FastAPI, Request
     from fastapi.responses import JSONResponse
+    from fastapi.middleware.cors import CORSMiddleware
 
     app = FastAPI(title="CAELLUM enhance", version="0.1")
+    # The game runs from a different origin (file:// or the relay host) and calls /enhance from
+    # the browser, so allow cross-origin requests.
+    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
     @app.get(config.HEALTH_ENDPOINT)
     def healthz() -> dict:
