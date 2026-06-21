@@ -79,12 +79,14 @@
         const self = this;
         this.recognize(strokes).then(function (r) { self._applyRecognition(prop, r, strokes, opts); });
       } else {
+        // use prop.label (always non-empty: defaults to 'thing') so a blank label never sends an
+        // empty string to CHLOE/fal. opts.description (a typed phrase) drives CHLOE when present.
         if (this.falEndpoint || this.endpoint) {
           const b64 = stripDataUrl(this._rasterizeUrl(strokes));
-          if (this.falEndpoint) this._falEnhanceInto(prop, b64, label);   // fast first pass
-          if (this.endpoint) this._enhanceInto(prop, b64, label);          // polished pass (wins)
+          if (this.falEndpoint) this._falEnhanceInto(prop, b64, prop.label);   // fast first pass
+          if (this.endpoint) this._enhanceInto(prop, b64, prop.label);          // polished pass (wins)
         }
-        if (this.chloeEndpoint) this._mechanicInto(prop, label, opts.description);
+        if (this.chloeEndpoint) this._mechanicInto(prop, prop.label, opts.description);
       }
       return prop;
     },
@@ -100,15 +102,15 @@
     spawnFromImage: function (dataUrl, label, x, y, opts) {
       const game = DS.game; if (!game || !game.props) return null;
       opts = opts || {};
-      const prop = new DS.Prop(Object.assign({ label: label, x: x, y: y }, opts));
+      const prop = new DS.Prop(Object.assign({ label: label || 'thing', x: x, y: y }, opts));
       const rough = new Image();
       rough.onload = function () { if (!prop.enhanced) prop.sprite = rough; };
       rough.src = dataUrl;
       game.props.push(prop);
       const b64 = stripDataUrl(dataUrl);
-      if (this.falEndpoint) this._falEnhanceInto(prop, b64, label);   // fast first pass
-      if (this.endpoint) this._enhanceInto(prop, b64, label);          // polished pass (wins)
-      if (this.chloeEndpoint) this._mechanicInto(prop, label, opts.description);
+      if (this.falEndpoint) this._falEnhanceInto(prop, b64, prop.label);   // fast first pass
+      if (this.endpoint) this._enhanceInto(prop, b64, prop.label);          // polished pass (wins)
+      if (this.chloeEndpoint) this._mechanicInto(prop, prop.label, opts.description);
       return prop;
     },
 
@@ -133,6 +135,7 @@
     // that lands after CAELLUM is dropped. fal only marks prop._falDone, never prop.enhanced, so the
     // later CAELLUM swap always wins regardless of arrival order. Never throws into the spawn path.
     _falEnhanceInto: function (prop, image_b64, label) {
+      const self = this;
       fetch(this.falEndpoint, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ image_b64: image_b64, label: label }),
@@ -140,10 +143,47 @@
         .then(function (out) {
           if (!out || !out.sprite_b64) throw new Error((out && out.error) || 'no sprite in response');
           const img = new Image();
-          img.onload = function () { if (!prop.enhanced) { prop.sprite = img; prop._falDone = true; } };
+          img.onload = function () {
+            if (prop.enhanced) return;                       // CAELLUM polish already applied -> keep it
+            const sprite = new Image();                      // fal returns a sprite WITH a background; cut it
+            sprite.onload = function () { if (!prop.enhanced) { prop.sprite = sprite; prop._falDone = true; } };
+            sprite.src = self._cutoutBg(img);
+          };
           img.src = 'data:image/png;base64,' + out.sprite_b64;
         })
         .catch(function (e) { if (global.__showErr) global.__showErr('fal enhance failed: ' + (e && e.message || e)); });
+    },
+
+    // remove a generated sprite's connected/solid background -> transparent PNG dataURL. Mirrors
+    // CAELLUM's server-side _cutout_bg: flood-fill from the corners/edges within a tolerance, then
+    // mop up near-white / light-grey stragglers. (fal returns sprites on a background; this strips it.)
+    _cutoutBg: function (img) {
+      const W = img.naturalWidth || img.width, H = img.naturalHeight || img.height;
+      const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+      const ctx = cv.getContext('2d'); ctx.drawImage(img, 0, 0);
+      let id; try { id = ctx.getImageData(0, 0, W, H); } catch (e) { return cv.toDataURL('image/png'); }
+      const d = id.data, N = W * H, seen = new Uint8Array(N), TH = 78, stack = [];
+      const seeds = [0, W - 1, (H - 1) * W, N - 1, (W >> 1), (H - 1) * W + (W >> 1), (H >> 1) * W, (H >> 1) * W + W - 1];
+      for (let s = 0; s < seeds.length; s++) {
+        const seed = seeds[s]; if (seen[seed]) continue;
+        const sr = d[seed * 4], sg = d[seed * 4 + 1], sb = d[seed * 4 + 2];
+        stack.length = 0; stack.push(seed);
+        while (stack.length) {
+          const i = stack.pop(); if (seen[i]) continue; seen[i] = 1;
+          if (Math.abs(d[i * 4] - sr) > TH || Math.abs(d[i * 4 + 1] - sg) > TH || Math.abs(d[i * 4 + 2] - sb) > TH) continue;
+          d[i * 4 + 3] = 0;
+          const x = i % W, y = (i / W) | 0;
+          if (x > 0) stack.push(i - 1); if (x < W - 1) stack.push(i + 1);
+          if (y > 0) stack.push(i - W); if (y < H - 1) stack.push(i + W);
+        }
+      }
+      for (let i = 0; i < N; i++) {                          // mop up light-grey / near-white leftovers
+        if (d[i * 4 + 3] === 0) continue;
+        const r = d[i * 4], g = d[i * 4 + 1], b = d[i * 4 + 2];
+        if ((r + g + b) / 3 > 175 && (Math.max(r, g, b) - Math.min(r, g, b)) < 28) d[i * 4 + 3] = 0;
+      }
+      ctx.putImageData(id, 0, 0);
+      return cv.toDataURL('image/png');
     },
 
     // POST the label to CHLOE and, on success, UPGRADE the prop's mechanic in place. Progressive
