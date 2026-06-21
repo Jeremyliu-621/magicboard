@@ -683,6 +683,24 @@
     if (ang > Math.PI / 2) ang -= Math.PI; else if (ang < -Math.PI / 2) ang += Math.PI;
     return { x: a[0] + (b[0] - a[0]) * t, y: a[1] + (b[1] - a[1]) * t, tilt: ang };
   }
+  // arc-length fraction (0..1) at which a contour first reaches world x — used to map a support span
+  // (in x) onto anchor points sampled ALONG the (possibly perpendicular-shifted) underside contour.
+  function fracAtX(contour, x) {
+    const n = contour.length; if (n < 2) return 0;
+    const seg = []; let total = 0;
+    for (let i = 1; i < n; i++) { const d = Math.hypot(contour[i][0] - contour[i - 1][0], contour[i][1] - contour[i - 1][1]); seg.push(d); total += d; }
+    if (total < 1e-6) return 0;
+    let acc = 0;
+    for (let i = 1; i < n; i++) {
+      const ax = contour[i - 1][0], bx = contour[i][0], lo = Math.min(ax, bx), hi = Math.max(ax, bx);
+      if (x >= lo - 0.5 && x <= hi + 0.5) {
+        const t = Math.abs(bx - ax) < 1e-6 ? 0 : (x - ax) / (bx - ax);
+        return (acc + seg[i - 1] * Math.max(0, Math.min(1, t))) / total;
+      }
+      acc += seg[i - 1];
+    }
+    return x <= contour[0][0] ? 0 : 1; // outside the x-range → clamp to the nearer end
+  }
   // sample the underside across x0..x1 into a short polyline (used as an island's upper edge)
   function undersideStrip(contour, x0, x1) {
     const steps = Math.max(2, Math.round(Math.abs(x1 - x0) / 44)), out = [], y0 = contour[0][1];
@@ -746,10 +764,13 @@
             // fewer, wider bays read as bolder arches (an aqueduct, not a fence of swags)
             const bays = Math.max(2, Math.min(5, Math.round((span / 320) * density)));
             const piers = [];
+            // anchor each pier to a real point ALONG the underside contour (by arc length), so its top
+            // always sits flush on the platform — even a tilted underside whose x-range is shifted.
+            const fL = fracAtX(contour, l), fR = fracAtX(contour, r);
             for (let k = 0; k <= bays; k++) {
-              const x = l + (span * k) / bays, u = undersideAt(contour, x), ay = u ? u.y : pb;
-              const pier = addPier(x, ay, u ? u.tilt : 0, k, true, false);
-              piers.push({ x, ay, ok: !!pier, botY: pier ? pier.botY : ay });
+              const a = contourPt(contour, fL + (fR - fL) * (k / bays));
+              const pier = addPier(a.x, a.y, a.tilt, k, true, false);
+              piers.push({ x: a.x, ay: a.y, ok: !!pier, botY: pier ? pier.botY : a.y });
             }
             for (let k = 0; k < bays; k++) {
               const A = piers[k], B = piers[k + 1];
@@ -1007,16 +1028,19 @@
   // cam/home are optional; without them (e.g. the static editor preview) everything draws unshifted.
   function px(v, cam, home, depth) { return cam == null ? v : v + (1 - depth) * (cam - home); }
 
-  // ---- two-layer parallax background: a soft sky (sun + clouds + a far ridge) and nearer
-  // rolling hills. Whisper-of-colour tints in the doodle style. FAR drifts slowly, NEAR a bit
-  // faster, so panning spreads them into a gentle diorama. Anchored to `home` (see px), so at
-  // rest every layer sits where authored. Generic for every stage (uses bounds/view).
-  const SKY_TOP = D.mix(D.COL.paper, '#7ba6d8', 0.16); // faint blue high up
-  const SKY_LOW = D.mix(D.COL.paper, '#bcd6ec', 0.09); // paler toward the horizon
-  const HILL_FAR = D.mix(D.COL.paper, '#7f9a72', 0.11); // distant ridge — soft gray-green
-  const HILL_NEAR = D.mix(D.COL.paper, '#6f9457', 0.17); // nearer hills — a touch greener
-  const SUN_C = D.mix(D.COL.paper, '#f4c64f', 0.55);    // soft warm sun
-  const CLOUD_C = D.mix(D.COL.paper, '#ffffff', 0.6);    // bright soft cloud
+  // ---- layered parallax background: sky → clouds → mountains → three hill ranges. Each layer
+  // drifts at its own rate (far = slow), spreading into a gentle diorama as the camera pans.
+  // Anchored to `home` (see px) so at rest everything sits where authored. Generic for every stage.
+  // Whisper-of-colour tints in the doodle style; far layers are grayer/bluer (atmospheric depth).
+  const SKY_TOP = D.mix(D.COL.paper, '#7ba6d8', 0.16);  // faint blue high up
+  const SKY_LOW = D.mix(D.COL.paper, '#bcd6ec', 0.08);  // paler toward the horizon
+  const MTN_FAR = D.mix(D.COL.paper, '#94a0b6', 0.16);  // distant mountains — cool gray-blue
+  const HILL_FAR = D.mix(D.COL.paper, '#8c9286', 0.09);  // far hills — mostly soft gray (barely green)
+  const HILL_MID = D.mix(D.COL.paper, '#828e74', 0.13);  // mid hills — a little more green
+  const HILL_NEAR = D.mix(D.COL.paper, '#728a5c', 0.17); // near hills — a muted green
+  const SUN_C = D.mix(D.COL.paper, '#f4c64f', 0.5);     // soft warm sun
+  const CLOUD_C = D.mix(D.COL.paper, '#ffffff', 0.72);   // bright soft cloud
+  const SOFT_LINE = D.mix(BG_INK, D.COL.paper, 0.5);     // lighter than BG_INK — gentle far outlines
 
   // how far a layer at `depth` slides given the camera's deviation from home (constant per layer)
   function layerShift(cx, hx, depth) { return (cx == null || hx == null) ? 0 : (1 - depth) * (cx - hx); }
@@ -1026,7 +1050,7 @@
   }
   // one rolling-hill band: filled silhouette + a soft top outline, drawn wide around the camera so
   // it always covers the view. `trees` dots a few tiny pine silhouettes on the crests.
-  function hillBand(ctx, cx, hx, depth, baseY, amp, k, fill, lineAlpha, trees) {
+  function hillBand(ctx, cx, hx, depth, baseY, amp, k, fill, lineCol, lineAlpha, trees) {
     const shift = layerShift(cx, hx, depth), c = cx != null ? cx : 0;
     const L = c - shift - 3400, R = c - shift + 3400, step = 30, bottom = baseY + 2600;
     ctx.save(); ctx.translate(shift, 0);
@@ -1034,13 +1058,13 @@
     for (let x = L; x <= R; x += step) ctx.lineTo(x, baseY + hillH(x, amp, k));
     ctx.lineTo(R, bottom); ctx.closePath();
     ctx.fillStyle = fill; ctx.fill();
-    ctx.globalAlpha = lineAlpha; ctx.strokeStyle = BG_INK; ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.globalAlpha = lineAlpha; ctx.strokeStyle = lineCol; ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
     ctx.beginPath();
     for (let x = L; x <= R; x += step) { const y = baseY + hillH(x, amp, k); x === L ? ctx.moveTo(x, y) : ctx.lineTo(x, y); }
     ctx.stroke(); ctx.globalAlpha = 1;
     if (trees) {
-      ctx.fillStyle = BG_INK; ctx.globalAlpha = 0.5;
-      for (let x = Math.ceil(L / 380) * 380; x <= R; x += 380) {
+      ctx.fillStyle = lineCol; ctx.globalAlpha = 0.55;
+      for (let x = Math.ceil(L / 360) * 360; x <= R; x += 360) {
         const y = baseY + hillH(x, amp, k);
         ctx.beginPath(); ctx.moveTo(x - 9, y); ctx.lineTo(x, y - 27); ctx.lineTo(x + 9, y); ctx.closePath(); ctx.fill();
         ctx.fillRect(x - 1.5, y - 3, 3, 8);
@@ -1049,52 +1073,87 @@
     }
     ctx.restore();
   }
-  // a soft bright cloud (overlapping lobes, faint underside arcs) — bg, not the inky foreground cloud
+  // a jagged distant mountain range (peaks + saddles), light snow tips, soft ridge outline
+  function mountainBand(ctx, cx, hx, depth, baseY, peakH, fill, lineCol) {
+    const shift = layerShift(cx, hx, depth), c = cx != null ? cx : 0;
+    const L = c - shift - 3400, R = c - shift + 3400, sp = 300, bottom = baseY + 2600;
+    const pts = [];
+    for (let x = Math.floor(L / sp) * sp - sp; x <= R + sp; x += sp) {
+      const r = DS.makeRng(DS.hashSeed('mtn' + x));
+      pts.push([x, baseY - peakH * (0.5 + r() * 0.7)]);          // peak
+      pts.push([x + sp / 2, baseY - peakH * (0.05 + r() * 0.18)]); // saddle
+    }
+    ctx.save(); ctx.translate(shift, 0);
+    ctx.beginPath(); ctx.moveTo(L, bottom);
+    for (const p of pts) ctx.lineTo(p[0], p[1]);
+    ctx.lineTo(R, bottom); ctx.closePath();
+    ctx.fillStyle = fill; ctx.fill();
+    // snow tips on the taller peaks
+    ctx.fillStyle = D.mix(fill, D.COL.paper, 0.62);
+    for (let i = 0; i < pts.length; i += 2) {
+      const pk = pts[i]; if (pk[1] > baseY - peakH * 0.6) continue;
+      ctx.beginPath(); ctx.moveTo(pk[0], pk[1]); ctx.lineTo(pk[0] - 12, pk[1] + 19); ctx.lineTo(pk[0] - 4, pk[1] + 14); ctx.lineTo(pk[0] + 3, pk[1] + 20); ctx.lineTo(pk[0] + 12, pk[1] + 15); ctx.closePath(); ctx.fill();
+    }
+    ctx.globalAlpha = 0.3; ctx.strokeStyle = lineCol; ctx.lineWidth = 2.5; ctx.lineJoin = 'round';
+    ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.stroke();
+    ctx.globalAlpha = 1; ctx.restore();
+  }
+  // a puffy cumulus: rounded tops on a flat-ish base, white fill, faint LIGHT outline over the tops
   function softCloud(ctx, x, y, s) {
-    const lobes = [[-34, 4, 22], [-10, -8, 28], [18, -6, 24], [38, 6, 18], [6, 11, 22]];
+    const bumps = [[-42, 4, 16], [-22, -7, 24], [2, -13, 28], [26, -7, 23], [46, 4, 17]];
     ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
     ctx.fillStyle = CLOUD_C;
-    for (const [lx, ly, lr] of lobes) { ctx.beginPath(); ctx.arc(lx, ly, lr, 0, 6.2832); ctx.fill(); }
-    ctx.globalAlpha = 0.35; ctx.strokeStyle = BG_INK; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
-    for (const [lx, ly, lr] of lobes) { ctx.beginPath(); ctx.arc(lx, ly, lr, Math.PI * 0.1, Math.PI * 0.9); ctx.stroke(); }
+    ctx.beginPath(); ctx.moveTo(-56, 8); ctx.quadraticCurveTo(0, 15, 58, 8); ctx.lineTo(58, 2); ctx.lineTo(-56, 2); ctx.closePath(); ctx.fill(); // flat base
+    for (const [bx, by, br] of bumps) { ctx.beginPath(); ctx.arc(bx, by, br, 0, 6.2832); ctx.fill(); } // puffy tops
+    ctx.globalAlpha = 0.3; ctx.strokeStyle = SOFT_LINE; ctx.lineWidth = 2; ctx.lineCap = 'round';
+    for (const [bx, by, br] of bumps) { ctx.beginPath(); ctx.arc(bx, by, br, Math.PI * 1.06, Math.PI * 1.94); ctx.stroke(); }
     ctx.restore(); ctx.globalAlpha = 1;
   }
   function bgSun(ctx, x, y) {
     ctx.save();
     for (let k = 4; k >= 1; k--) { ctx.globalAlpha = 0.05; ctx.fillStyle = SUN_C; ctx.beginPath(); ctx.arc(x, y, 44 + k * 17, 0, 6.2832); ctx.fill(); }
     ctx.globalAlpha = 1; ctx.fillStyle = SUN_C; ctx.beginPath(); ctx.arc(x, y, 44, 0, 6.2832); ctx.fill();
-    ctx.globalAlpha = 0.45; ctx.strokeStyle = D.mix(SUN_C, D.COL.ink, 0.3); ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(x, y, 44, 0, 6.2832); ctx.stroke();
+    ctx.globalAlpha = 0.4; ctx.strokeStyle = D.mix(SUN_C, D.COL.ink, 0.3); ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(x, y, 44, 0, 6.2832); ctx.stroke();
     ctx.restore(); ctx.globalAlpha = 1;
   }
 
-  // Background — drawn before drawStage, inside the world transform.
+  // Background — drawn before drawStage, inside the world transform. Layered back→front.
   function drawBackground(ctx, data, cam, home) {
     const st = stageOf(data);
     const b = st.bounds || { x0: 0, y0: 0, x1: DS.VIEW.w, y1: DS.VIEW.h };
     const cx = cam && cam.cx, hx = home && home.x;
     const horizon = st.bounds ? b.y0 + (b.y1 - b.y0) * 0.60 : DS.VIEW.h * 0.64;
-    const top = (st.bounds ? b.y0 : 0) - 2200;
+    const top = (st.bounds ? b.y0 : 0) - 2400;
 
-    // 1) sky tint — a subtle vertical gradient fading to the cream paper at the horizon
+    // sky tint — a subtle vertical gradient fading to the cream paper at the horizon
     ctx.save();
     const g = ctx.createLinearGradient(0, top, 0, horizon);
     g.addColorStop(0, SKY_TOP); g.addColorStop(0.72, SKY_LOW); g.addColorStop(1, D.COL.paper);
-    ctx.fillStyle = g; ctx.fillRect(b.x0 - 3600, top, (b.x1 - b.x0) + 7200, horizon - top + 2);
+    ctx.fillStyle = g; ctx.fillRect(b.x0 - 3800, top, (b.x1 - b.x0) + 7600, horizon - top + 2);
     ctx.restore();
 
-    // 2) FAR layer (slow drift): sun + a band of clouds + a distant ridge
-    const FAR = 0.14, sShift = layerShift(cx, hx, FAR), sc = cx != null ? cx : (b.x0 + b.x1) / 2;
-    ctx.save(); ctx.translate(sShift, 0);
-    bgSun(ctx, (b.x0 + b.x1) / 2 - (b.x1 - b.x0) * 0.26 - 140, top + (horizon - top) * 0.36);
-    for (let x = Math.floor((sc - sShift - 2800) / 540) * 540; x <= sc - sShift + 2800; x += 540) {
+    // sun (slowest)
+    const sunShift = layerShift(cx, hx, 0.05);
+    ctx.save(); ctx.translate(sunShift, 0);
+    bgSun(ctx, (b.x0 + b.x1) / 2 - (b.x1 - b.x0) * 0.27 - 130, horizon - 300);
+    ctx.restore();
+
+    // clouds — far sky layer, sitting just above the horizon (behind the mountains)
+    const cloudShift = layerShift(cx, hx, 0.09), sc = cx != null ? cx : (b.x0 + b.x1) / 2;
+    ctx.save(); ctx.translate(cloudShift, 0);
+    for (let x = Math.floor((sc - cloudShift - 3000) / 620) * 620; x <= sc - cloudShift + 3000; x += 620) {
       const r = DS.makeRng(DS.hashSeed('cld' + x));
-      softCloud(ctx, x + r() * 170, top + (horizon - top) * (0.14 + r() * 0.36), 0.8 + r() * 0.7);
+      softCloud(ctx, x + r() * 200, horizon - (110 + r() * 230), 0.85 + r() * 0.7);
     }
     ctx.restore();
-    hillBand(ctx, cx, hx, FAR, horizon - 8, 66, 1.3, HILL_FAR, 0.32, false); // distant ridge (far layer)
 
-    // 3) NEAR layer (faster drift): the main rolling hills + a few tiny trees
-    hillBand(ctx, cx, hx, 0.45, horizon + 50, 122, 3.1, HILL_NEAR, 0.5, true);
+    // mountains — a range behind the hills
+    mountainBand(ctx, cx, hx, 0.14, horizon + 6, 210, MTN_FAR, SOFT_LINE);
+
+    // three rolling-hill ranges (far→near, each drifts a little faster)
+    hillBand(ctx, cx, hx, 0.26, horizon + 4, 72, 1.3, HILL_FAR, SOFT_LINE, 0.3, false);
+    hillBand(ctx, cx, hx, 0.38, horizon + 34, 102, 2.2, HILL_MID, BG_INK, 0.36, false);
+    hillBand(ctx, cx, hx, 0.50, horizon + 72, 128, 3.1, HILL_NEAR, BG_INK, 0.48, true);
   }
 
   function drawStage(ctx, data, cam, home) {
