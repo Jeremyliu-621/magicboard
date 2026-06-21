@@ -475,7 +475,21 @@
           pr.fade = POOF; pr.vx *= 0.25; pr.vy = pr.vy * 0.25 - 30; // drift up a touch as it dissipates
         }
       }
+      // element interactions: opposing-element shots (and tagged world props) react on contact
+      if (DS.Graph) DS.Graph.resolveContacts(this.projectiles, this.props, (r, x, y) => this._reactionFx(r, x, y));
       this.projectiles = this.projectiles.filter((p) => !p.dead && (p.fade == null || p.fade > 0));
+    }
+
+    // the visual for an element reaction (fire+water=fizzle steam, electric+water=shock, ...)
+    _reactionFx(r, x, y) {
+      const e = this.effects;
+      e.impact(x, y, 1.0); e.shake(0.12);
+      if (r.fx === 'steam' || r.fx === 'mist' || r.fx === 'dilute') e.charge(x, y, '#cfe');
+      else if (r.fx === 'shock' || r.fx === 'overload' || r.fx === 'shatter') { e.ultHit(x, y, 1.1, '#9cf'); e.hitstop(0.05); }
+      else if (r.fx === 'ignite' || r.fx === 'flare' || r.fx === 'melt' || r.fx === 'forge') e.charge(x, y, '#f93');
+      else if (r.fx === 'flash') { e.ultHit(x, y, 1.3, '#fff'); e.hitstop(0.06); }
+      else e.charge(x, y, '#fff');
+      if (e.floatText && r.note) e.floatText(x, y - 22, r.note);   // demo flair: "fizzle", "shock", ...
     }
 
     // run a graph projectile's on.land effects ONCE, wherever it comes to rest (fighter/platform/life).

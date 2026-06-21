@@ -143,6 +143,17 @@
       const g = EXAMPLE_GRAPHS[key]; if (!g) return null;
       return this.spawnFromStrokes(placeholder(g.label), g.label, x != null ? x : v.w * 0.5, y != null ? y : 150, { mechanic: g.graph });
     },
+
+    // dev/testing: launch a fire shot and a water shot at each other so the element reaction
+    // (fizzle + steam) is visible SOLO — no second player needed.
+    testElementClash: function () {
+      const game = DS.game; if (!game || !game.projectiles) return;
+      const v = game.view || { w: 1920, h: 1080 }, y = v.h * 0.42, cx = v.w / 2, sp = 520;
+      const mk = (px, dir, tags, col) => ({ owner: { x: px, y: y, facing: dir, tagCol: col },
+        cfg: { tags: tags, damage: 5, r: 16, life: 6, gravity: 0 }, x: px, y: y, vx: dir * sp, vy: 0, life: 6, r: 16, facing: dir, spin: 0 });
+      game.projectiles.push(mk(cx - 420, 1, ['fire'], '#f93'));
+      game.projectiles.push(mk(cx + 420, -1, ['water'], '#39f'));
+    },
   };
 
   // hand-authored demo graphs for the dev keys — exercise hit/land composition + elements w/o CHLOE.
@@ -240,6 +251,7 @@
     const label = { Digit1: 'gun', Digit2: 'sword', Digit3: 'bomb', Digit4: 'spikes', Digit5: 'spring' }[e.code];
     if (label) return void AI.devSpawnProp(label);
     const gk = { Digit6: 'frost', Digit7: 'cluster' }[e.code];   // graph items: 6=Frost Cannon 7=Cluster Bomb
-    if (gk) AI.devSpawnGraph(gk);
+    if (gk) return void AI.devSpawnGraph(gk);
+    if (e.code === 'Digit8') AI.testElementClash();              // 8 = fire-vs-water reaction demo
   });
 })(window);

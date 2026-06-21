@@ -228,6 +228,48 @@
     return null;
   }
 
+  // ---- element contact resolution: tagged things meeting react (fire+water=fizzle, ...) ----
+  function overlap(a, b, ar, br) { return Math.abs(a.x - b.x) <= ar + br && Math.abs(a.y - b.y) <= ar + br; }
+  function tagsHit(tags, remove) { for (const t of tags) if (remove.indexOf(t) >= 0) return true; return false; }
+
+  // Scan tagged projectiles against each other (different owners) and against tagged world props, apply
+  // react(), consume the elements it removes, and fire onReact(reaction, x, y) for the visual. Each
+  // entity reacts at most once (`_reacted`) so a lingering overlap doesn't spam. Returns reaction count.
+  function resolveContacts(projectiles, props, onReact) {
+    const ps = projectiles || []; let count = 0;
+    for (let i = 0; i < ps.length; i++) {
+      const a = ps[i];
+      if (a.dead || a.fade != null || a._reacted || !a.cfg || !a.cfg.tags) continue;
+      for (let j = i + 1; j < ps.length; j++) {
+        const b = ps[j];
+        if (b.dead || b.fade != null || b._reacted || !b.cfg || !b.cfg.tags || b.owner === a.owner) continue;
+        if (!overlap(a, b, a.r, b.r)) continue;
+        const r = react(a.cfg.tags, b.cfg.tags);
+        if (!r) continue;
+        a._reacted = b._reacted = true;
+        if (r.remove.length) { if (tagsHit(a.cfg.tags, r.remove)) a.dead = true; if (tagsHit(b.cfg.tags, r.remove)) b.dead = true; }
+        if (onReact) onReact(r, (a.x + b.x) / 2, (a.y + b.y) / 2);
+        count++;
+        if (a.dead) break;
+      }
+    }
+    for (const a of ps) {
+      if (a.dead || a.fade != null || a._reacted || !a.cfg || !a.cfg.tags) continue;
+      for (const p of (props || [])) {
+        if (p.dead || p.held || !p.mechanic || !p.mechanic.tags || !p.mechanic.tags.length) continue;
+        if (Math.abs(a.x - p.x) > a.r + p.w / 2 || Math.abs(a.y - p.y) > a.r + p.h / 2) continue;
+        const r = react(a.cfg.tags, p.mechanic.tags);
+        if (!r) continue;
+        a._reacted = true;
+        if (r.remove.length) { if (tagsHit(a.cfg.tags, r.remove)) a.dead = true; if (tagsHit(p.mechanic.tags, r.remove)) p.dead = true; }
+        if (onReact) onReact(r, (a.x + p.x) / 2, (a.y + p.y) / 2);
+        count++;
+        break;
+      }
+    }
+    return count;
+  }
+
   // ---- the interpreter ----
   // runEffects: dispatch a raw effect LIST (used by the engine's collision handlers for on.hit/
   // on.land, where there's no graph object — just the stamped trigger list). Safe: unknown ops skipped.
@@ -253,7 +295,7 @@
     EFFECTS: EFFECTS, REACTIONS: REACTIONS, ELEMENTS: ELEMENTS,
     TRIGGERS: TRIGGERS, STATUSES: STATUSES, BUFFS: BUFFS,
     OPS: Object.keys(EFFECTS),
-    run: run, runEffects: runEffects, react: react, projCfg: projCfg,
+    run: run, runEffects: runEffects, react: react, resolveContacts: resolveContacts, projCfg: projCfg,
     isGraph: function (m) { return !!(m && m.on && typeof m.on === 'object'); },
   };
 })(window);
