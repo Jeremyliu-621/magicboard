@@ -14,18 +14,18 @@
     power: '#2f6fe0',   // vibrant "charged" blue — ultimate ready / in use
     powerDeep: '#1c46a8',
     powerSoft: '#5b8fcf', // gentler, easier-on-the-eyes blue — the building-up "charge" tint
-    // bright, clean storybook fills — a cheerful colour wash UNDER the ink line-art (the ink stroke
-    // still carries every shape, so it stays a doodle). Used for platform bodies (by kind) and the
-    // procedural scenery. Friendly + fresh, not muddy/desaturated.
-    mGround: '#9ed85f',   // fresh grass green
-    mWood: '#edba6e',     // warm honey wood
-    mStone: '#bccfdd',    // clean soft blue-grey stone
-    mCrystal: '#85ddd7',  // bright aqua
-    mBox: '#eeb55f',      // warm crate tan
-    mFloat: '#b6e1f4',    // light sky blue
-    leaf: '#4ea03c',      // foliage stroke — clean leaf green
-    leafFill: '#bfe98e',  // foliage fill — bright pale green
-    stoneSoft: '#cbd4da', // scenery structures (pillars/arches/islands) — clean light stone
+    // soft pastel fills — a gentle, low-saturation colour wash UNDER the ink line-art (the ink
+    // stroke still carries every shape, so it stays a minimalist doodle). Light + clean, sensible
+    // per material, but never vivid. Used for platform bodies (by kind) and the procedural scenery.
+    mGround: '#cfe3ad',   // soft grass green
+    mWood: '#ecd9b2',     // pale wood tan
+    mStone: '#d3dce2',    // pale blue-grey stone
+    mCrystal: '#cbe6e0',  // pale aqua
+    mBox: '#eed8b0',      // pale crate tan
+    mFloat: '#d8e8f1',    // pale sky blue
+    leaf: '#86ad6a',      // foliage stroke — soft green
+    leafFill: '#d3e7b6',  // foliage fill — pale green
+    stoneSoft: '#d8dde0', // scenery structures (pillars/arches/islands) — pale stone-grey
   };
 
   // blend two hex colours ('#rrggbb') by t in 0..1 → '#rrggbb'
