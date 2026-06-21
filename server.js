@@ -228,10 +228,11 @@ async function vlmRecognize(req, res) {
   if (typeof image_b64 !== 'string' || !image_b64) return sendJson(res, 400, { error: 'image_b64 is required' });
   const dataUri = image_b64.startsWith('data:') ? image_b64 : `data:image/png;base64,${image_b64}`;
 
-  const prompt = `This is a child's rough doodle for a 2D fighting game. In ONE or TWO words, what did ` +
-    `they draw? Strongly prefer one of these game words when it fits: ${VLM_VOCAB}. If it is clearly an ` +
-    `element, use the element word (fire, water, ice, lightning, plant, poison, wind, metal, light, dark). ` +
-    `Reply with ONLY the word(s), lowercase, no punctuation, no explanation.`;
+  const prompt = `This is a child's simple doodle. In ONE or TWO words, what is it? Name the ACTUAL ` +
+    `object with a simple common noun — e.g. fish, house, sun, flower, cat, tree, boat, sword, star, ` +
+    `apple, key, heart. Do NOT force it into a weapon/game word: if it's a fish say "fish", if it's a ` +
+    `house say "house". Only if it clearly IS a weapon or element, name it plainly (sword, gun, fire, ` +
+    `water, ice, lightning). Reply with ONLY the word(s), lowercase, no punctuation, no explanation.`;
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 25000);
