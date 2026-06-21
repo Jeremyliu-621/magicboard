@@ -95,7 +95,14 @@
         .then(function (spec) {
           if (!spec || !spec.node) throw new Error((spec && spec.error) || 'no node in response');
           const mech = specToMechanic(spec);
-          if (mech) { prop.mechanic = mech; prop.archetype = mech.archetype; }
+          if (mech) {
+            prop.mechanic = mech; prop.archetype = mech.archetype;
+            // if CHLOE reclassified it as an environment element (hazard/spring), it's no longer a
+            // held weapon — drop it where the holder stands so it acts on the arena instead.
+            if (prop.isEnv && prop.isEnv() && prop.held) {
+              const h = prop.held; if (h.heldProp === prop) h.heldProp = null; prop.held = null;
+            }
+          }
         })
         .catch(function (e) { if (global.__showErr) global.__showErr('CHLOE mechanic failed: ' + (e && e.message || e)); });
     },
@@ -133,9 +140,9 @@
 
   // CHLOE spec {node, params, name, flavor} -> a DS.Prop.fire() mechanic cfg (same shape as
   // DS.Mechanics.DEFAULTS). The spec is already CLAMPED server-side by config.clamp_spec(); this
-  // is a pure rename of node->kind, no new gameplay numbers. Returns null for nodes that aren't a
-  // held-item mechanic (hazard/bouncy are Track-B environment placement, not a fired prop) so the
-  // default mechanic is left untouched. Mirrors the DS.Mechanics archetype->kind knowledge.
+  // is a pure rename of node->kind, no new gameplay numbers. hazard/bouncy map to ENVIRONMENT
+  // mechanics (Track B: DS.Prop.handleEnvironment acts on them — a drawn spike trap / launch pad),
+  // everything else maps to a held-item mechanic. Mirrors the DS.Mechanics archetype->kind knowledge.
   function specToMechanic(spec) {
     const node = spec.node, p = spec.params || {};
     // projectile_weapon/throwable params ARE the engine projectile cfg -> fire() spawns it directly.
@@ -154,8 +161,10 @@
     }
     if (node === 'heal') return { kind: 'heal', archetype: 'heal', amount: p.amount, cooldown: 0 };
     if (node === 'buff') return { kind: 'buff', archetype: 'buff', effect: p.effect, dur: p.dur, cooldown: 0 };
-    // hazard/bouncy/anything else: not a held-and-fired mechanic — keep the default.
-    return null;
+    // Track B environment elements — the prop is placed into the arena, not held + fired.
+    if (node === 'hazard') return { kind: 'hazard', archetype: 'hazard', damage: p.damage, radius: p.radius };
+    if (node === 'bouncy') return { kind: 'bouncy', archetype: 'bouncy', bounce: p.bounce };
+    return null; // unknown node: keep the prop's default mechanic
   }
   function stripDataUrl(u) { const i = u.indexOf(','); return i >= 0 ? u.slice(i + 1) : u; }
   function bbox(strokes) {
@@ -181,6 +190,15 @@
     if (L === 'bomb' || L === 'ball') return [
       { pts: circle(0, 4, 22), w: 6 }, { pts: [[6, -16], [12, -26], [20, -24]], w: 4 },
     ];
+    if (L === 'spikes' || L === 'trap' || L === 'saw') return [ // Track B hazard: jagged row
+      { pts: [[-34, 18], [-22, -14], [-10, 18], [2, -14], [14, 18], [26, -14], [34, 18]], w: 5 },
+      { pts: [[-36, 18], [36, 18]], w: 5 },
+    ];
+    if (L === 'spring' || L === 'trampoline') return [ // Track B launch pad: coil + bars
+      { pts: [[-26, -16], [26, -16]], w: 6 },
+      { pts: [[-16, -16], [16, -6], [-16, 2], [16, 10], [-16, 18]], w: 5 },
+      { pts: [[-26, 20], [26, 20]], w: 6 },
+    ];
     return [{ pts: [[-30, -18], [30, -18], [30, 18], [-30, 18], [-30, -18]], w: 5 }]; // generic box
   }
   function circle(cx, cy, r) {
@@ -190,10 +208,12 @@
   DS.AI = AI;
   global.DS.devSpawnProp = function (label, x, y) { return AI.devSpawnProp(label, x, y); };
 
-  // dev keys (testing without the iPad path): 1=gun 2=sword 3=bomb, spawned mid-stage.
+  // dev keys (testing without the iPad path): held weapons 1=gun 2=sword 3=bomb, and Track B
+  // environment elements 4=spikes (hazard) 5=spring (launch pad), spawned mid-stage. The env ones
+  // work with zero AI connected — DS.Mechanics.defaultFor() already tags spikes->hazard, spring->bouncy.
   global.addEventListener('keydown', function (e) {
     if (e.repeat) return;
-    const label = { Digit1: 'gun', Digit2: 'sword', Digit3: 'bomb' }[e.code];
+    const label = { Digit1: 'gun', Digit2: 'sword', Digit3: 'bomb', Digit4: 'spikes', Digit5: 'spring' }[e.code];
     if (label && DS.game && DS.game.state === 'playing') AI.devSpawnProp(label);
   });
 })(window);

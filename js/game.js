@@ -332,6 +332,7 @@
       if (this.props) {
         for (const prop of this.props) prop.update(dt, this.world);
         if (DS.Prop) DS.Prop.handlePickups(this);
+        if (DS.Prop && DS.Prop.handleEnvironment) DS.Prop.handleEnvironment(this, dt); // Track B: hazards/springs
         this.props = this.props.filter((p) => !p.dead);
       }
       this.effects.update(dt);

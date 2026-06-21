@@ -100,6 +100,16 @@
     this.held = null; this.dead = true;
   };
 
+  // Track B: a prop whose mechanic is an ENVIRONMENT element (drawn into the arena, not a held
+  // weapon). hazard = damage-on-contact zone; bouncy = launch pad. These are not picked up and not
+  // fired — they sit in the world (still fall + rest on a platform via update()) and act on contact.
+  Prop.prototype.isEnv = function () {
+    const k = this.mechanic && this.mechanic.kind;
+    // 'platform' is reserved for future Track B work (solid drawn surfaces); not env-handled yet,
+    // so it keeps its default behavior rather than becoming an inert prop.
+    return k === 'hazard' || k === 'bouncy';
+  };
+
   Prop.prototype.render = function (ctx) {
     ctx.save();
     ctx.translate(this.x, this.y);
@@ -126,11 +136,55 @@
       if (f.dead) { if (f.heldProp) { f.heldProp.held = null; f.heldProp = null; } continue; }
       if (f.heldProp) continue;
       for (const p of props) {
-        if (p.held || p.dead || p.bornT < 0.25) continue;
+        if (p.held || p.dead || p.bornT < 0.25 || p.isEnv()) continue; // env props aren't picked up
         if (Math.abs(f.x - p.x) < (f.w + p.w) / 2 && Math.abs(f.y - p.y) < (f.h + p.h) / 2) {
           f.heldProp = p; p.held = f; p.vx = 0; p.vy = 0;
           if (game.effects) game.effects.charge(f.x, f.y - 6, f.tagCol);
           break;
+        }
+      }
+    }
+  };
+
+  // Track B environment contact: drawn hazards hurt fighters who touch them; springs launch
+  // fighters who come down onto them. Call from Game.update AFTER handlePickups. Mirrors the
+  // handlePickups iteration (fighters x props) and reuses the same AABB + Fighter._takeHit the
+  // rest of the game uses, so a drawn hazard hits exactly like any other source of damage.
+  const BOUNCE_VY_MIN = 60;        // a fighter must be actually descending to trigger a spring
+  const HAZARD_REHIT = 0.6;        // seconds a fighter is immune to THE SAME hazard after a tick
+
+  Prop.handleEnvironment = function (game, dt) {
+    const props = game.props; if (!props || !props.length) return;
+    for (const p of props) {
+      if (p.dead || p.held || !p.isEnv()) continue;
+      const m = p.mechanic;
+      // tick down this hazard's per-fighter re-hit cooldowns
+      if (p._hitCool) for (const [f, t] of p._hitCool) {
+        if (t - dt <= 0) p._hitCool.delete(f); else p._hitCool.set(f, t - dt);
+      }
+      for (const f of game.fighters) {
+        if (f.dead || f.respawnT > 0) continue;
+        const dx = Math.abs(f.x - p.x), dy = Math.abs(f.y - p.y);
+
+        if (m.kind === 'hazard') {
+          if (f.invuln > 0) continue;
+          const R = m.radius || Math.max(p.w, p.h) * 0.5;          // CHLOE's radius widens the field
+          if (dx > f.w / 2 + R || dy > f.h / 2 + R) continue;       // not in the hazard zone
+          if (p._hitCool && p._hitCool.has(f)) continue;            // already ticked recently
+          const dir = (f.x >= p.x) ? 1 : -1;                        // shove away from the hazard
+          f._takeHit({ damage: m.damage || 10, kbBase: m.kbBase || 20,
+                       kbScale: m.kbScale || 0.08, angle: 35 }, dir, null, game.world);
+          (p._hitCool || (p._hitCool = new Map())).set(f, HAZARD_REHIT);
+          if (game.effects) { game.effects.groundSpikes(f.x, f.y + f.h / 2, 0.8); game.effects.shake(0.15); }
+
+        } else if (m.kind === 'bouncy') {
+          const overlap = dx < (f.w + p.w) / 2 && dy < (f.h + p.h) / 2;
+          if (overlap && f.vy >= BOUNCE_VY_MIN) {                   // came down onto the pad
+            f.vy = -(m.bounce || 1300);
+            f.onGround = false; f.ground = null;
+            if (f.ch && f.ch.stats) f.jumps = f.ch.stats.maxJumps;  // refresh air jumps off the spring
+            if (game.effects) { game.effects.dust(f.x, f.y + f.h / 2, f.facing); game.effects.charge(f.x, f.y, f.tagCol); }
+          }
         }
       }
     }
