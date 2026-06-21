@@ -731,27 +731,34 @@
               front.push({ t: 'ivy', x: ax, topY: ay, botY: sup.y, side: idx % 2 ? 1 : -1, seed: seed + 85 + idx });
             return d;
           };
-          // is the supported underside roughly horizontal? (so an x-based arcade reads right)
-          const uL = contourPt(contour, 0.12), uR = contourPt(contour, 0.88);
-          const flat = Math.abs(uR.y - uL.y) < span * 0.26;
+          // does an ARCADE fit? the underside must be STRAIGHT (not curved/valley) and not too steep —
+          // sample the whole supported span, not just the endpoints, so a U-shaped platform is excluded
+          // (its evenly-spaced piers wouldn't line up and we'd be left with arches floating in space).
+          const NS = 6, samp = [];
+          for (let s = 0; s <= NS; s++) samp.push(contourPt(contour, 0.1 + 0.8 * s / NS));
+          const uL = samp[0], uR = samp[NS]; let maxDev = 0;
+          for (let s = 0; s <= NS; s++) maxDev = Math.max(maxDev, Math.abs(samp[s].y - (uL.y + (uR.y - uL.y) * s / NS)));
+          const straight = maxDev < Math.min(46, span * 0.06);
+          const flat = straight && Math.abs(uR.y - uL.y) < span * 0.34; // tilt is OK, a curve is not
           const midGap = (() => { const s = surfaceBelow(plats, (l + r) / 2, (uL.y + uR.y) / 2 + 2, p, grounded); return s ? s.y - (uL.y + uR.y) / 2 : 0; })();
           if (flat && span > 420 && midGap > 150 && density >= 0.6) {
             // ARCADE: a row of slim piers joined by arches (aqueduct/viaduct) — for big, tall, flat spans
             // fewer, wider bays read as bolder arches (an aqueduct, not a fence of swags)
             const bays = Math.max(2, Math.min(5, Math.round((span / 320) * density)));
-            const tops = [], feet = [];
+            const piers = [];
             for (let k = 0; k <= bays; k++) {
               const x = l + (span * k) / bays, u = undersideAt(contour, x), ay = u ? u.y : pb;
               const pier = addPier(x, ay, u ? u.tilt : 0, k, true, false);
-              tops.push([x, ay]); feet.push(pier ? pier.botY : ay + 200);
+              piers.push({ x, ay, ok: !!pier, botY: pier ? pier.botY : ay });
             }
             for (let k = 0; k < bays; k++) {
-              const a = tops[k], b = tops[k + 1], hw = (b[0] - a[0]) / 2;
-              const pierH = (feet[k] + feet[k + 1]) / 2 - (a[1] + b[1]) / 2;   // deck→foot height
+              const A = piers[k], B = piers[k + 1];
+              if (!A.ok || !B.ok) continue; // an arch needs BOTH its piers to have landed — else skip the bay
+              const hw = (B.x - A.x) / 2, pierH = (A.botY + B.botY) / 2 - (A.ay + B.ay) / 2;
               // round arch ≈ semicircular (rise = half the bay), but stretched taller on tall piers so it
               // fills the bay (a stilted arch) instead of stranding a long bare leg — capped at ⅔ the pier.
               const rise = Math.max(28, Math.min(pierH * 0.66, Math.max(hw, pierH * 0.42)));
-              behind.push({ t: 'arch', x0: a[0], y0: a[1], x1: b[0], y1: b[1], rise, seed: seed + 50 + k * 5 });
+              behind.push({ t: 'arch', x0: A.x, y0: A.ay, x1: B.x, y1: B.ay, rise, seed: seed + 50 + k * 5 });
             }
           } else {
             // pillars anchored to points sampled ALONG the underside contour (near each end, + middle
@@ -895,29 +902,26 @@
   // an impost partway down each pier and crowns just under the deck — the opening below is arch-topped.
   function drawArch(ctx, it) {
     const rnd = DS.makeRng(it.seed);
-    const midx = (it.x0 + it.x1) / 2, hw = (it.x1 - it.x0) / 2;
-    const deck = (it.y0 + it.y1) / 2 + 3;      // crown sits just under the platform underside
-    const rise = it.rise;                       // springline is `rise` below the deck
-    const impost = deck + rise;
-    // sample the upper half of an ellipse: ends at the two imposts, apex at the crown
-    const N = 20, arc = [], inner = [];
+    const x0 = it.x0, x1 = it.x1, y0 = it.y0, y1 = it.y1, midx = (x0 + x1) / 2, hw = (x1 - x0) / 2, rise = it.rise;
+    // upper half of an ellipse riding a (possibly tilted) baseline: the two ends sit at each pier's
+    // impost (its own underside + rise), the apex crowns just under the deck. Works on a sloped deck.
+    const N = 20, outer = [], inner = [];
     for (let i = 0; i <= N; i++) {
-      const a = Math.PI * (1 - i / N);          // π (left impost) → 0 (right impost)
-      const x = midx + hw * Math.cos(a), s = Math.sin(a);
-      arc.push([x, impost - rise * s]);
-      inner.push([midx + (hw - 6) * Math.cos(a), impost - (rise - 6) * s]); // archivolt (inner ring)
+      const t = i / N, a = Math.PI * (1 - t), s = Math.sin(a), base = y0 + (y1 - y0) * t;
+      outer.push([midx + hw * Math.cos(a), base + rise * (1 - s) + 2]);
+      inner.push([midx + (hw - 6) * Math.cos(a), base + (rise - 6) * (1 - s) + 8]);
     }
-    D.strokePts(ctx, arc, { width: 4, color: SCN, rnd, passes: 1, jitter: 0.5 });
+    D.strokePts(ctx, outer, { width: 4, color: SCN, rnd, passes: 1, jitter: 0.5 });
     ctx.globalAlpha = 0.4; D.strokePts(ctx, inner, { width: 2.5, color: SCN, passes: 1, jitter: 0.5 }); ctx.globalAlpha = 1;
-    // little voussoir ticks around the crown + a keystone, so it reads as masonry not a loop
+    // little voussoir ticks + a keystone so the crown reads as masonry, not a bare loop
     ctx.globalAlpha = 0.5;
-    for (const a of [Math.PI * 0.5, Math.PI * 0.32, Math.PI * 0.68]) {
-      const ox = midx + hw * Math.cos(a), oy = impost - rise * Math.sin(a);
-      const ix = midx + (hw - 7) * Math.cos(a), iy = impost - (rise - 7) * Math.sin(a);
-      D.line(ctx, ix, iy, ox, oy, { width: 2, color: SCN, rnd, passes: 1 });
+    for (const idx of [N >> 1, (N * 0.32) | 0, (N * 0.68) | 0]) {
+      const o = outer[idx], ir = inner[idx];
+      D.line(ctx, ir[0], ir[1], o[0], o[1], { width: 2, color: SCN, rnd, passes: 1 });
     }
     ctx.globalAlpha = 1;
-    ctx.fillStyle = SCN; ctx.globalAlpha = 0.45; ctx.beginPath(); ctx.arc(midx, deck + 1, 2.6, 0, 7); ctx.fill(); ctx.globalAlpha = 1; // keystone dot
+    const cr = outer[N >> 1];
+    ctx.fillStyle = SCN; ctx.globalAlpha = 0.45; ctx.beginPath(); ctx.arc(cr[0], cr[1] + 1, 2.6, 0, 7); ctx.fill(); ctx.globalAlpha = 1; // keystone dot
   }
   // a buttress: a wedge strut bracing a tall lone pier back to the ground
   function drawButtress(ctx, it) {
@@ -1003,24 +1007,94 @@
   // cam/home are optional; without them (e.g. the static editor preview) everything draws unshifted.
   function px(v, cam, home, depth) { return cam == null ? v : v + (1 - depth) * (cam - home); }
 
-  // Background — called before drawStage, inside the world transform. The authored parallax
-  // structures (mountains/towers, the `st.bg` array) are intentionally OFF for now: this draws a
-  // simple placeholder of a faint line or two (a real background layer is planned separately). The
-  // bg art lives in the same scenery gray (SCN) as the dressing so it all reads as one backdrop.
+  // ---- two-layer parallax background: a soft sky (sun + clouds + a far ridge) and nearer
+  // rolling hills. Whisper-of-colour tints in the doodle style. FAR drifts slowly, NEAR a bit
+  // faster, so panning spreads them into a gentle diorama. Anchored to `home` (see px), so at
+  // rest every layer sits where authored. Generic for every stage (uses bounds/view).
+  const SKY_TOP = D.mix(D.COL.paper, '#7ba6d8', 0.16); // faint blue high up
+  const SKY_LOW = D.mix(D.COL.paper, '#bcd6ec', 0.09); // paler toward the horizon
+  const HILL_FAR = D.mix(D.COL.paper, '#7f9a72', 0.11); // distant ridge — soft gray-green
+  const HILL_NEAR = D.mix(D.COL.paper, '#6f9457', 0.17); // nearer hills — a touch greener
+  const SUN_C = D.mix(D.COL.paper, '#f4c64f', 0.55);    // soft warm sun
+  const CLOUD_C = D.mix(D.COL.paper, '#ffffff', 0.6);    // bright soft cloud
+
+  // how far a layer at `depth` slides given the camera's deviation from home (constant per layer)
+  function layerShift(cx, hx, depth) { return (cx == null || hx == null) ? 0 : (1 - depth) * (cx - hx); }
+  // smooth continuous rolling-hill height (so crests stay stable as the camera pans); k varies shape
+  function hillH(x, amp, k) {
+    return -amp * (0.55 * Math.sin(x * 0.0015 + k * 1.7) + 0.30 * Math.sin(x * 0.0041 + k * 2.3) + 0.15 * Math.sin(x * 0.0094 + k));
+  }
+  // one rolling-hill band: filled silhouette + a soft top outline, drawn wide around the camera so
+  // it always covers the view. `trees` dots a few tiny pine silhouettes on the crests.
+  function hillBand(ctx, cx, hx, depth, baseY, amp, k, fill, lineAlpha, trees) {
+    const shift = layerShift(cx, hx, depth), c = cx != null ? cx : 0;
+    const L = c - shift - 3400, R = c - shift + 3400, step = 30, bottom = baseY + 2600;
+    ctx.save(); ctx.translate(shift, 0);
+    ctx.beginPath(); ctx.moveTo(L, bottom);
+    for (let x = L; x <= R; x += step) ctx.lineTo(x, baseY + hillH(x, amp, k));
+    ctx.lineTo(R, bottom); ctx.closePath();
+    ctx.fillStyle = fill; ctx.fill();
+    ctx.globalAlpha = lineAlpha; ctx.strokeStyle = BG_INK; ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (let x = L; x <= R; x += step) { const y = baseY + hillH(x, amp, k); x === L ? ctx.moveTo(x, y) : ctx.lineTo(x, y); }
+    ctx.stroke(); ctx.globalAlpha = 1;
+    if (trees) {
+      ctx.fillStyle = BG_INK; ctx.globalAlpha = 0.5;
+      for (let x = Math.ceil(L / 380) * 380; x <= R; x += 380) {
+        const y = baseY + hillH(x, amp, k);
+        ctx.beginPath(); ctx.moveTo(x - 9, y); ctx.lineTo(x, y - 27); ctx.lineTo(x + 9, y); ctx.closePath(); ctx.fill();
+        ctx.fillRect(x - 1.5, y - 3, 3, 8);
+      }
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+  }
+  // a soft bright cloud (overlapping lobes, faint underside arcs) — bg, not the inky foreground cloud
+  function softCloud(ctx, x, y, s) {
+    const lobes = [[-34, 4, 22], [-10, -8, 28], [18, -6, 24], [38, 6, 18], [6, 11, 22]];
+    ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+    ctx.fillStyle = CLOUD_C;
+    for (const [lx, ly, lr] of lobes) { ctx.beginPath(); ctx.arc(lx, ly, lr, 0, 6.2832); ctx.fill(); }
+    ctx.globalAlpha = 0.35; ctx.strokeStyle = BG_INK; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+    for (const [lx, ly, lr] of lobes) { ctx.beginPath(); ctx.arc(lx, ly, lr, Math.PI * 0.1, Math.PI * 0.9); ctx.stroke(); }
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
+  function bgSun(ctx, x, y) {
+    ctx.save();
+    for (let k = 4; k >= 1; k--) { ctx.globalAlpha = 0.05; ctx.fillStyle = SUN_C; ctx.beginPath(); ctx.arc(x, y, 44 + k * 17, 0, 6.2832); ctx.fill(); }
+    ctx.globalAlpha = 1; ctx.fillStyle = SUN_C; ctx.beginPath(); ctx.arc(x, y, 44, 0, 6.2832); ctx.fill();
+    ctx.globalAlpha = 0.45; ctx.strokeStyle = D.mix(SUN_C, D.COL.ink, 0.3); ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(x, y, 44, 0, 6.2832); ctx.stroke();
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
+
+  // Background — drawn before drawStage, inside the world transform.
   function drawBackground(ctx, data, cam, home) {
     const st = stageOf(data);
     const b = st.bounds || { x0: 0, y0: 0, x1: DS.VIEW.w, y1: DS.VIEW.h };
-    const x0 = b.x0 - 500, x1 = b.x1 + 500;
-    const baseY = st.bounds ? b.y1 * 0.46 : DS.VIEW.h * 0.52; // a soft horizon
-    ctx.save(); ctx.strokeStyle = SCN; ctx.lineCap = 'round'; ctx.globalAlpha = 0.45;
-    for (let i = 0; i < 2; i++) {
-      ctx.lineWidth = 3 - i;
-      ctx.beginPath();
-      ctx.moveTo(px(x0, cam && cam.cx, home && home.x, 0.25), baseY + i * 30);
-      ctx.lineTo(px(x1, cam && cam.cx, home && home.x, 0.25), baseY + i * 30);
-      ctx.stroke();
+    const cx = cam && cam.cx, hx = home && home.x;
+    const horizon = st.bounds ? b.y0 + (b.y1 - b.y0) * 0.60 : DS.VIEW.h * 0.64;
+    const top = (st.bounds ? b.y0 : 0) - 2200;
+
+    // 1) sky tint — a subtle vertical gradient fading to the cream paper at the horizon
+    ctx.save();
+    const g = ctx.createLinearGradient(0, top, 0, horizon);
+    g.addColorStop(0, SKY_TOP); g.addColorStop(0.72, SKY_LOW); g.addColorStop(1, D.COL.paper);
+    ctx.fillStyle = g; ctx.fillRect(b.x0 - 3600, top, (b.x1 - b.x0) + 7200, horizon - top + 2);
+    ctx.restore();
+
+    // 2) FAR layer (slow drift): sun + a band of clouds + a distant ridge
+    const FAR = 0.14, sShift = layerShift(cx, hx, FAR), sc = cx != null ? cx : (b.x0 + b.x1) / 2;
+    ctx.save(); ctx.translate(sShift, 0);
+    bgSun(ctx, (b.x0 + b.x1) / 2 - (b.x1 - b.x0) * 0.26 - 140, top + (horizon - top) * 0.36);
+    for (let x = Math.floor((sc - sShift - 2800) / 540) * 540; x <= sc - sShift + 2800; x += 540) {
+      const r = DS.makeRng(DS.hashSeed('cld' + x));
+      softCloud(ctx, x + r() * 170, top + (horizon - top) * (0.14 + r() * 0.36), 0.8 + r() * 0.7);
     }
-    ctx.restore(); ctx.globalAlpha = 1;
+    ctx.restore();
+    hillBand(ctx, cx, hx, FAR, horizon - 8, 66, 1.3, HILL_FAR, 0.32, false); // distant ridge (far layer)
+
+    // 3) NEAR layer (faster drift): the main rolling hills + a few tiny trees
+    hillBand(ctx, cx, hx, 0.45, horizon + 50, 122, 3.1, HILL_NEAR, 0.5, true);
   }
 
   function drawStage(ctx, data, cam, home) {
