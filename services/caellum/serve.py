@@ -200,14 +200,24 @@ def _cutout_bg(rgb_img):
     img = rgb_img.convert("RGB")
     w, h = img.size
     SENT = (255, 0, 255)  # magenta sentinel (never occurs in a charcoal doodle)
-    for xy in ((0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)):
+    # pass 1: flood-fill the connected background from the corners AND edge midpoints, with a
+    # generous tolerance so it bridges a sketchy/hatched texture without bleeding into the dark asset.
+    seeds = [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1),
+             (w // 2, 0), (w // 2, h - 1), (0, h // 2), (w - 1, h // 2)]
+    for xy in seeds:
         try:
-            ImageDraw.floodfill(img, xy, SENT, thresh=50)
+            ImageDraw.floodfill(img, xy, SENT, thresh=85)
         except Exception:
             pass
     arr = np.array(img.convert("RGBA"))
-    sent = (arr[:, :, 0] == 255) & (arr[:, :, 1] == 0) & (arr[:, :, 2] == 255)
-    arr[:, :, 3] = np.where(sent, 0, 255).astype(np.uint8)
+    rgb = arr[:, :, :3].astype(np.int16)
+    sent = (rgb[:, :, 0] == 255) & (rgb[:, :, 1] == 0) & (rgb[:, :, 2] == 255)
+    # pass 2: mop up any near-white / light-grey stragglers the fill missed (keeps the dark
+    # outline + any saturated fills, so the asset itself stays).
+    bright = rgb.mean(axis=2)
+    sat = rgb.max(axis=2) - rgb.min(axis=2)
+    light_gray = (bright > 175) & (sat < 28)
+    arr[:, :, 3] = np.where(sent | light_gray, 0, 255).astype(np.uint8)
     return Image.fromarray(arr, "RGBA")
 
 
