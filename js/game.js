@@ -4,6 +4,26 @@
   const DS = global.DS;
   const D = DS.draw;
   const POOF = 0.26; // seconds for a projectile's fade-out animation
+
+  // per-reaction visual style for element interactions (DS.Graph.react fx -> burst look). col = tint,
+  // pop = intensity, rise = wisps drift up (steam/fire/growth), debris = shards, ult = sharp burst.
+  const GRAPH_FX = {
+    steam:    { col: '#cfe7f5', pop: 0.8, rise: true },
+    mist:     { col: '#cfe7f5', pop: 0.6, rise: true },
+    dilute:   { col: '#bfe6c8', pop: 0.6, rise: true },
+    shock:    { col: '#8fd6ff', pop: 1.2, debris: 7, ult: true, stop: 0.06 },
+    overload: { col: '#8fd6ff', pop: 1.3, debris: 8, ult: true, stop: 0.06 },
+    shatter:  { col: '#bfe9ff', pop: 1.2, debris: 9, ult: true, stop: 0.05 },
+    ignite:   { col: '#ff8a3c', pop: 1.0, debris: 6, rise: true },
+    flare:    { col: '#ff8a3c', pop: 1.0, debris: 6, rise: true },
+    forge:    { col: '#ffb347', pop: 0.9, debris: 4, rise: true },
+    melt:     { col: '#ffae6b', pop: 0.8, debris: 3, rise: true },
+    grow:     { col: '#7fd18a', pop: 0.7, rise: true },
+    frost:    { col: '#cfeeff', pop: 0.7, debris: 4 },
+    rust:     { col: '#b5793c', pop: 0.7, debris: 4 },
+    ground:   { col: '#caa46a', pop: 0.8, debris: 5 },
+    flash:    { col: '#ffffff', pop: 1.6, ult: true, stop: 0.08, shakeBig: true },
+  };
   // per-player colours (markers + HUD cards) so up to 6 fighters read apart at a glance
   const PCOL = ['#5b8c5a', '#c0603a', '#3f6fa0', '#9a6cb0', '#b58a2e', '#3f8f86'];
   // after a winner is decided the match doesn't freeze — it keeps simulating (fighters can
@@ -54,6 +74,7 @@
       const skins = this.playerSkins || [];
       this.fighters.forEach((f, i) => { if (skins[i] && skins[i].enabled) { const ch = DS.data.clone(f.ch); ch.skin = skins[i]; f.ch = ch; } });
       this.projectiles = [];
+      this.props = []; // drawn items/props (DS.Prop) injected at runtime by DS.AI
       this.cam = { cx: d.view.w / 2, cy: d.view.h / 2, zoom: 1 };
       // dev: when set (a number), force a fixed overview zoom so you can see the whole
       // arena / blast borders. null = normal dynamic camera. Toggled by keys in main.js.
@@ -68,6 +89,7 @@
         settings: d.settings, platforms: this.stage.platforms, stage: this.stage, view: d.view,
         effects: this.effects, game: this,
         blast: this.blast, bounds: this.bounds,
+        get fighters() { return game.fighters; },   // graph effects (aoe/chain/pull/beam) iterate this
         // reuse one scratch array instead of allocating a filtered copy on every call (called in
         // attack hit-loops). callers iterate the result immediately and never nest opponents() calls.
         _oppScratch: [],
@@ -402,6 +424,12 @@
       }
       this._resolveBodies();
       this._updateProjectiles(dt);
+      if (this.props) {
+        for (const prop of this.props) prop.update(dt, this.world);
+        if (DS.Prop) DS.Prop.handlePickups(this);
+        if (DS.Prop && DS.Prop.handleEnvironment) DS.Prop.handleEnvironment(this, dt); // Track B: hazards/springs
+        this.props = this.props.filter((p) => !p.dead);
+      }
       this.effects.update(dt);
       // mode-specific scoring & win conditions (Smash also runs the stock/timer check here)
       this.mode.update(this, dt);
@@ -531,6 +559,10 @@
           if (f === pr.owner || f.dead || f.respawnT > 0 || f.invuln > 0) continue;
           if (Math.abs(f.x - pr.x) < f.w / 2 + pr.r && Math.abs(f.y - pr.y) < f.h / 2 + pr.r) {
             f._takeHit(pr.cfg, pr.vx >= 0 ? 1 : -1, pr.owner, this.world);
+            // graph projectile: run its on.hit (freeze/aoe/chain) on the struck fighter, then on.land
+            // (a bomb explodes on a direct hit too).
+            if (pr.cfg.onHit && DS.Graph) DS.Graph.runEffects(pr.cfg.onHit, { world: this.world, holder: pr.owner, hitTarget: f, x: pr.x, y: pr.y, facing: pr.facing });
+            this._graphLand(pr);
             if (pr.cfg.sniper) { this.effects.ultHit(pr.x, pr.y, 1.5, pr.owner && pr.owner.tagCol); this.effects.hitstop(0.12); } // satisfying snipe
             else this.effects.impact(pr.x, pr.y, 0.8);
             pr.dead = true; struck = true; break;
@@ -576,16 +608,43 @@
           } else if (pr.x > p.x && pr.x < p.x + p.w && pr.y > p.y && pr.y < p.y + p.h) {
             if (p._hp != null) this.damageBox(p, pr.cfg.damage || 6);
             else if (DS.Audio) DS.Audio.play('fizzle', { x: pr.x });
+            this._graphLand(pr);   // bomb/thrown graph projectile lands on a platform -> on.land (explode)
             this.effects.impact(pr.x, pr.y, 0.4); pr.dead = true; struck = true; break;
           }
         }
         if (struck) continue;
         // ran out of life / left the arena -> gentle shrink-and-fade poof (not a hard cut)
         if (pr.life <= 0 || pr.x < b.left || pr.x > b.right || pr.y < b.top || pr.y > b.bottom) {
+          this._graphLand(pr);   // ran out of life / left the arena -> on.land (timed explosion)
           pr.fade = POOF; pr.vx *= 0.25; pr.vy = pr.vy * 0.25 - 30; // drift up a touch as it dissipates
         }
       }
+      // element interactions: opposing-element shots (and tagged world props) react on contact
+      if (DS.Graph) DS.Graph.resolveContacts(this.projectiles, this.props, (r, x, y) => this._reactionFx(r, x, y));
       this.projectiles = this.projectiles.filter((p) => !p.dead && (p.fade == null || p.fade > 0));
+    }
+
+    // the visual for an element reaction — a distinct colour + burst per reaction family so each
+    // reads instantly (steam puffs up, electricity cracks, fire throws embers, annihilation flashes).
+    _reactionFx(r, x, y) {
+      const e = this.effects;
+      const S = GRAPH_FX[r.fx] || { col: '#ffffff', pop: 0.8 };
+      e.impact(x, y, S.pop);
+      e.charge(x, y, S.col);
+      if (S.ult) e.ultHit(x, y, S.pop, S.col);                          // electric/flash: sharp tonal burst
+      if (S.debris) e.debris(x, y, S.debris, S.pop);                    // shards / embers fly out
+      if (S.rise) for (let i = 0; i < 5; i++) e.aura(x, y - 4, S.col);  // steam / fire / growth wisps up
+      e.shake(S.shakeBig ? 0.3 : 0.12);
+      if (S.stop) e.hitstop(S.stop);
+      if (e.floatText && r.note) e.floatText(x, y - 24, r.note);        // "fizzle", "shock", ...
+      if (DS.Audio) DS.Audio.play('fizzle', { x: x });
+    }
+
+    // run a graph projectile's on.land effects ONCE, wherever it comes to rest (fighter/platform/life).
+    _graphLand(pr) {
+      if (pr._landed || !pr.cfg || !pr.cfg.onLand || !DS.Graph) return;
+      pr._landed = true;
+      DS.Graph.runEffects(pr.cfg.onLand, { world: this.world, holder: pr.owner, hitTarget: null, x: pr.x, y: pr.y, facing: pr.facing });
     }
 
     // boomerang hammer: flies out (decelerating) to mid range, then homes back to the thrower,
@@ -630,6 +689,26 @@
           D.line(ctx, 0, 18, 0, -16, { width: 6, color: oc, rnd, passes: 1 });
           D.strokePts(ctx, [[-11, -16], [15, -16], [15, -33], [-11, -33]], { width: 5, color: oc, rnd, closed: true, fill: ocDeep });
           ctx.restore();
+          continue;
+        }
+        // a DRAWN weapon's shot: the kid's own creation flies as the projectile (element weapons fire
+        // their sprite, tagged so two elements CLASH via resolveContacts). Handles its own fade-out.
+        if (pr.cfg && pr.cfg.useSprite) {
+          const fk = pr.fade != null ? Math.max(0, pr.fade / POOF) : 1;
+          ctx.save(); ctx.globalAlpha = fk; ctx.translate(pr.x, pr.y);
+          if (pr.facing < 0) ctx.scale(-1, 1);
+          const spr = pr.cfg.sprite;
+          if (spr && spr.complete && spr.naturalWidth) {
+            const s = pr.r * 2.6 * (0.6 + 0.4 * fk);
+            ctx.drawImage(spr, -s / 2, -s / 2, s, s);
+          } else if (pr.cfg.strokes && pr.cfg.strokes.length) {
+            const src = Math.max(pr.cfg.srcW || 60, pr.cfg.srcH || 60), sc = (pr.r * 2.2) / src;
+            ctx.scale(sc, sc);
+            for (const st of pr.cfg.strokes) D.strokePts(ctx, st.pts, { width: st.w || 5, rnd, jitter: 0.5, passes: 1 });
+          } else {
+            D.circle(ctx, 0, 0, pr.r, { width: 4, color: D.COL.ink, rnd, fill: D.COL.paper, wob: 1.5 });
+          }
+          ctx.globalAlpha = 1; ctx.restore();
           continue;
         }
         // dissipating: the ball shrinks and fades while little dashes puff outward
@@ -804,6 +883,7 @@
       if (this.mode.renderWorld) this.mode.renderWorld(this, ctx);
       for (const f of this.fighters) f.render(ctx, this.world);
       this._renderProjectiles(ctx);
+      if (this.props) for (const prop of this.props) prop.render(ctx, this.world);
       this.effects.render(ctx);
       for (const f of this.fighters) this._marker(ctx, f);
       if (this.devBars) for (const f of this.fighters) this._devSpeedBar(ctx, f);

@@ -24,6 +24,239 @@ const TLS_CERT = process.env.MAGICBOARD_TLS_CERT;
 const TLS_KEY = process.env.MAGICBOARD_TLS_KEY;
 const MAX_PLAYERS = 6;
 
+// ---- fal.ai enhance proxy config ----------------------------------------
+// PIPELINE (default 'recraft'): the kid's rough drawing -> Recraft V3 image-to-image (a clean,
+// CONSISTENT illustration style that LEVELS UP the doodle into a real game sprite while still
+// following its shape) -> BiRefNet background removal (a real ML cutout, run SERVER-SIDE so it never
+// stalls the browser render loop) -> transparent PNG. Set FAL_PIPELINE=sdxl for the old canny path.
+const FAL_PIPELINE = (process.env.FAL_PIPELINE || 'recraft').toLowerCase();
+// 'text' (default): generate a CLEAN game icon FROM the recognized label — ignore the doodle's shape
+// entirely (this is what gives a real game-asset look). 'image': image-to-image (traces the doodle —
+// only recolors it; kept for comparison via FAL_GEN_MODE=image).
+const FAL_GEN_MODE = (process.env.FAL_GEN_MODE || 'text').toLowerCase();
+const FAL_GEN_MODEL_T2I = 'fal-ai/recraft/v3/text-to-image';
+const FAL_GEN_MODEL_I2I = 'fal-ai/recraft/v3/image-to-image';
+const FAL_RMBG_MODEL = 'fal-ai/birefnet/v2';
+// Recraft style + how far it may stray from the kid's drawing (0 = identical .. 1 = ignore it).
+// digital_illustration/hand_drawn fits the doodle world; vector_illustration/bold_stroke is flatter.
+// Both are env-tunable so we can dial the look without code edits.
+const FAL_STYLE = process.env.FAL_STYLE || 'digital_illustration/hand_drawn';
+const FAL_STRENGTH = Number(process.env.FAL_STRENGTH || 0.68); // higher = upscales into a proper asset, not a doodle
+// ---- VLM (open-vocab doodle recognition) ----
+const VLM_MODEL = process.env.MAGICBOARD_VLM_MODEL || 'gpt-4.1-mini';
+// the words the game can turn into mechanics — steer the VLM toward a USABLE label (js/mechanics.js).
+const VLM_VOCAB = 'sword, knife, axe, hammer, bat, gun, bow, slingshot, bomb, ball, dart, rock, ' +
+  'fire, water, ice, lightning, plant, poison, wind, metal, light, dark, ' +
+  'star, crown, gem, key, heart, shield, apple, banana, food, bread, cake, pizza, ' +
+  'cloud, mushroom, tree, anvil, skull, boomerang, umbrella';
+const FAL_TIMEOUT_MS = 60000;
+// legacy fallback: fast-sdxl-controlnet-canny (FAL_PIPELINE=sdxl)
+const FAL_SDXL_MODEL = 'fal-ai/fast-sdxl-controlnet-canny';
+const FAL_NEG_PROMPT =
+  'realistic, photo, photograph, 3d, render, detailed, shading, gradient, texture, ' +
+  'noise, busy background, scenery, shadow, reflection, blurry, watermark, text, signature';
+
+// FAL_KEY (format "id:secret"): prefer the env var; otherwise parse a
+// FAL_KEY=... line from a .env in the repo root. Never hardcoded.
+function falKey() {
+  if (process.env.FAL_KEY) return process.env.FAL_KEY.trim();
+  try {
+    const txt = fs.readFileSync(path.join(ROOT, '.env'), 'utf8');
+    for (const line of txt.split(/\r?\n/)) {
+      const m = line.match(/^\s*FAL_KEY\s*=\s*(.+?)\s*$/);
+      if (m) return m[1].replace(/^['"]|['"]$/g, '').trim();
+    }
+  } catch (e) { /* no .env => unset */ }
+  return null;
+}
+
+// OPENAI_API_KEY for the VLM recognizer: env, then root .env, then backend/.env (where the
+// level-editor keeps it). Never hardcoded.
+function openaiKey() {
+  if (process.env.OPENAI_API_KEY) return process.env.OPENAI_API_KEY.trim();
+  for (const rel of ['.env', path.join('backend', '.env')]) {
+    try {
+      const txt = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+      for (const line of txt.split(/\r?\n/)) {
+        const m = line.match(/^\s*OPENAI_API_KEY\s*=\s*(.+?)\s*$/);
+        if (m) return m[1].replace(/^['"]|['"]$/g, '').trim();
+      }
+    } catch (e) { /* skip */ }
+  }
+  return null;
+}
+
+// Recraft target prompt — the STYLE param carries the look, so the prompt just names the subject
+// and asks for a clean, single, game-ready sprite.
+function recraftPrompt(label) {
+  return `a clean, well-drawn hand-drawn doodle of a ${label} — confident tidy ink linework, ` +
+    `neat and crisp, simple flat colors, like a polished sketch by a skilled artist. ` +
+    `Single centered object, whole object fully visible with margin (not cropped), ` +
+    `plain solid white background, clean edges, no text, no background, no scenery.`;
+}
+// Legacy SDXL prompt (FAL_PIPELINE=sdxl).
+function falPrompt(label) {
+  return `a very simple minimal flat doodle of a ${label}, single thick black marker outline, ` +
+    `two flat colors, no shading, no detail, childlike, centered, plain white background`;
+}
+
+// Read a request body up to a sane cap, parse as JSON.
+function readJsonBody(req, maxBytes = 12 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    let size = 0; const chunks = [];
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > maxBytes) { reject(new Error('body too large')); req.destroy(); return; }
+      chunks.push(c);
+    });
+    req.on('end', () => {
+      try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
+      catch (e) { reject(new Error('body must be JSON')); }
+    });
+    req.on('error', reject);
+  });
+}
+
+function sendJson(res, status, obj) {
+  res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify(obj));
+}
+
+// POST a fal model and return its parsed JSON (throws a descriptive error on a non-2xx).
+async function falPost(model, payload, key, signal) {
+  const r = await fetch(`https://fal.run/${model}`, {
+    method: 'POST',
+    headers: { 'Authorization': `Key ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  });
+  if (!r.ok) {
+    const detail = await r.text().catch(() => '');
+    const e = new Error(`${model} failed (${r.status}) ${detail.slice(0, 300)}`);
+    e.status = r.status;
+    throw e;
+  }
+  return r.json();
+}
+
+// Fetch an image URL (hosted or data URI) and return it as base64.
+async function fetchB64(url, signal) {
+  const r = await fetch(url, { signal });
+  if (!r.ok) throw new Error(`fetching image failed (${r.status})`);
+  return Buffer.from(await r.arrayBuffer()).toString('base64');
+}
+
+// POST /fal-enhance — { image_b64, label } -> { sprite_b64 }.
+// Stage 1: generate a clean game sprite from the kid's drawing (Recraft i2i, or SDXL canny).
+// Stage 2: remove the background server-side (BiRefNet) so the client gets a TRANSPARENT sprite and
+// never has to run a cutout model on its render thread. Cutout is best-effort: if it fails we still
+// return the generated sprite rather than failing the whole enhance.
+async function falEnhance(req, res) {
+  const key = falKey();
+  if (!key) return sendJson(res, 500, { error: 'FAL_KEY not configured (env or .env)' });
+
+  let body;
+  try { body = await readJsonBody(req); }
+  catch (e) { return sendJson(res, 400, { error: e.message || 'bad body' }); }
+
+  const image_b64 = body && body.image_b64;
+  if (typeof image_b64 !== 'string' || !image_b64) {
+    return sendJson(res, 400, { error: 'image_b64 (base64 PNG, no data: prefix) is required' });
+  }
+  const label = (body && typeof body.label === 'string' && body.label.trim()) || 'object';
+  // accept either a raw base64 string or an already-prefixed data URI
+  const dataUri = image_b64.startsWith('data:') ? image_b64 : `data:image/png;base64,${image_b64}`;
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), FAL_TIMEOUT_MS);
+  try {
+    // --- stage 1: generate ---
+    let genUrl;
+    if (FAL_PIPELINE === 'sdxl') {
+      const out = await falPost(FAL_SDXL_MODEL, {
+        prompt: falPrompt(label), negative_prompt: FAL_NEG_PROMPT, control_image_url: dataUri,
+        controlnet_conditioning_scale: 0.45, guidance_scale: 6.5, num_inference_steps: 30,
+        image_size: 'square', num_images: 1, enable_safety_checker: false,
+      }, key, ctrl.signal);
+      genUrl = out && out.images && out.images[0] && out.images[0].url;
+    } else if (FAL_GEN_MODE === 'image') {
+      const out = await falPost(FAL_GEN_MODEL_I2I, {
+        image_url: dataUri, prompt: recraftPrompt(label), strength: FAL_STRENGTH, style: FAL_STYLE,
+      }, key, ctrl.signal);
+      genUrl = out && out.images && out.images[0] && out.images[0].url;
+    } else {
+      // text-to-image: a clean game icon FROM the label, ignoring the doodle's shape (the good-looking path)
+      const out = await falPost(FAL_GEN_MODEL_T2I, {
+        prompt: recraftPrompt(label), style: FAL_STYLE, image_size: 'square_hd',
+      }, key, ctrl.signal);
+      genUrl = out && out.images && out.images[0] && out.images[0].url;
+    }
+    if (!genUrl) return sendJson(res, 502, { error: 'fal returned no image' });
+
+    // Return the RAW generated image. The CLIENT isolates the object (drops the plain background AND
+    // the stray decoration blobs Recraft scatters around it) with a fast connected-components pass —
+    // BiRefNet's salient-object cutout grabbed the wrong region on thin-lined doodles, so it's gone.
+    const sprite_b64 = await fetchB64(genUrl, ctrl.signal);
+    return sendJson(res, 200, { sprite_b64 });
+  } catch (e) {
+    if (e && e.name === 'AbortError') return sendJson(res, 504, { error: 'fal request timed out' });
+    return sendJson(res, 502, { error: `fal enhance failed: ${(e && e.message) || e}` });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// POST /vlm-recognize { image_b64 } -> { top:{label,confidence}, results:[...], confident }.
+// Open-vocab doodle recognition via the OpenAI vision model — reads ANYTHING (a bare flame -> "fire"),
+// unlike the fixed 25-class CNN. Mirrors the CNN /recognize response shape (js/ai.js recognize()).
+async function vlmRecognize(req, res) {
+  const key = openaiKey();
+  if (!key) return sendJson(res, 500, { error: 'OPENAI_API_KEY not configured (env, .env, or backend/.env)' });
+
+  let body;
+  try { body = await readJsonBody(req); }
+  catch (e) { return sendJson(res, 400, { error: e.message || 'bad body' }); }
+  const image_b64 = body && body.image_b64;
+  if (typeof image_b64 !== 'string' || !image_b64) return sendJson(res, 400, { error: 'image_b64 is required' });
+  const dataUri = image_b64.startsWith('data:') ? image_b64 : `data:image/png;base64,${image_b64}`;
+
+  const prompt = `This is a child's rough doodle for a 2D fighting game. In ONE or TWO words, what did ` +
+    `they draw? Strongly prefer one of these game words when it fits: ${VLM_VOCAB}. If it is clearly an ` +
+    `element, use the element word (fire, water, ice, lightning, plant, poison, wind, metal, light, dark). ` +
+    `Reply with ONLY the word(s), lowercase, no punctuation, no explanation.`;
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 25000);
+  try {
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: VLM_MODEL, max_tokens: 12, temperature: 0,
+        messages: [{ role: 'user', content: [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: dataUri } },
+        ] }],
+      }),
+      signal: ctrl.signal,
+    });
+    if (!r.ok) {
+      const detail = await r.text().catch(() => '');
+      return sendJson(res, 502, { error: `vlm request failed (${r.status})`, detail: detail.slice(0, 300) });
+    }
+    const out = await r.json();
+    let label = ((out && out.choices && out.choices[0] && out.choices[0].message && out.choices[0].message.content) || '')
+      .trim().toLowerCase().replace(/[^a-z \-]/g, '').trim() || 'thing';
+    const top = { label: label, archetype: null, element: null, confidence: 0.95 };
+    return sendJson(res, 200, { results: [top], top: top, confident: true });
+  } catch (e) {
+    if (e && e.name === 'AbortError') return sendJson(res, 504, { error: 'vlm request timed out' });
+    return sendJson(res, 502, { error: `vlm recognize failed: ${(e && e.message) || e}` });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ---- static file serving -------------------------------------------------
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
@@ -60,6 +293,16 @@ const requestHandler = async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-store' });
       return res.end(svg);
     } catch (e) { res.writeHead(400); return res.end('bad qr'); }
+  }
+  // fal.ai enhance proxy: rough scribble + label -> polished doodle sprite
+  if (p === '/fal-enhance') {
+    if (req.method !== 'POST') { res.writeHead(405); return res.end('method not allowed'); }
+    return falEnhance(req, res);
+  }
+  // VLM open-vocab recognition: a drawing PNG -> a game label (replaces the 25-class CNN)
+  if (p === '/vlm-recognize') {
+    if (req.method !== 'POST') { res.writeHead(405); return res.end('method not allowed'); }
+    return vlmRecognize(req, res);
   }
   // health check for hosting platforms
   if (p === '/healthz') { res.writeHead(200); return res.end('ok'); }

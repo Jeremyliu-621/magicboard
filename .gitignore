@@ -2,11 +2,30 @@
 node_modules/
 *.log
 
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# CAELLUM generated artifacts (compiled models + datasets are NOT source)
+caellum_neuron/
+train_out/
+data/caellum_teacher/
+data/caellum_pairs/
+*.neuron
+*.safetensors
+chloe_graph_lora/
+caellum_lora_out/
+recognizer_model/
+data/quickdraw/
+*.npz
+*.pt
+.venv-caellum/
+
+# MagicBoard (friend's branch) local/runtime artifacts
 AGENTS.md
 **/AGENTS.md
 TODO.md
-
-# Milestone 1 local/runtime artifacts
 backend/.venv/
 backend/.pytest_cache/
 backend/**/__pycache__/
@@ -16,4 +35,5 @@ draw-client/node_modules/
 draw-client/dist/
 draw-client/.npm-cache/
 
+# secrets
 .env

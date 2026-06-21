@@ -8,19 +8,26 @@ charcoal "soft marker" doodle on warm paper — drawn procedurally in code, no i
 It runs as a plain web page (HTML5 Canvas 2D + vanilla JS). No build step, no dependencies.
 
 ## The endgame (why decisions are the way they are)
-The long-term goal is an **AR layer**: a camera feed is analyzed by computer vision to detect
-real-world flat surfaces (a desk, shelves, books), and the game composites fighters and combat
-**on top of those real platforms** in real time. The current game is the playable core that the
-CV pipeline will eventually drive.
+The goal is a **live creation game**: players draw their own characters, weapons, and hazards on an
+iPad and an AI pipeline injects them — **refined and functional** — into the projected match in real
+time. The showpiece is **real-time asset enhancement** (a rough sketch becomes a polished doodle in
+<100ms felt latency) and **real-time mechanic injection** (a drawn gun becomes a working weapon
+seconds later). The current fighter is the playable core this pipeline creates *into*. See `08` for
+the direction and `13` for the runtime design.
 
 Consequences that shaped the project:
-- **Web, not a native engine.** Browsers have first-class real-time CV (MediaPipe / TensorFlow.js
-  / WebGL) and camera access, run everywhere, and need no install.
-- **Performance is the north star.** The CV pipeline will be the expensive part later, so the game
-  itself must stay cheap (target a solid 60fps with headroom).
-- **Stage geometry is plain data.** `data.stage.platforms` is just a list of rectangles. A CV
-  module can *generate* that list from detected surfaces and feed the exact same game. That seam
-  is deliberate — keep it clean.
+- **Web, not a native engine.** iPad drawing, a projector display, phone controllers, and easy
+  WebSocket fan-out between the game and the AI microservices — zero install, runs anywhere.
+- **Performance is the north star.** The projector runs a live 60fps match while AI assets stream in;
+  the render must stay cheap so the budget is protected for the AI pipeline (enhancement + mechanics).
+- **Stage/skin/mechanic data is plain and serializable.** AI-generated content (vector strokes, stage
+  rectangles, mechanic specs) flows through the *exact same seams* the editor uses — so a drawing
+  pipeline, agents, and the editor all produce the same data the game reads.
+
+> Earlier this doc framed a **computer-vision AR layer** (detecting real-world surfaces and compositing
+> the game on top) as the endgame. That's now an **optional, far-future idea**, not the goal — a CV
+> module could produce `data.stage.platforms` through the same seam, but we're building the creation
+> pipeline. See `08`.
 
 ## Who plays
 Local **2 players on one keyboard** (P1 vs P2), matching the classic couch-fighter feel.

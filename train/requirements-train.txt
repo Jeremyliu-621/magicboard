@@ -1,0 +1,29 @@
+# CAELLUM training deps — CUDA / Colab-Kaggle env ONLY.
+#
+# THIS IS A SEPARATE ENVIRONMENT from the Neuron box. Do NOT install these on the
+# AWS workshop / inf2 instance (that env uses services/caellum/requirements-neuron.txt
+# with torch-neuronx + optimum-neuron and has NO CUDA). Mixing the two will break
+# torch. These pins target a standard Colab/Kaggle GPU runtime (CUDA 12.x).
+#
+# Used by: train/train_caellum_ip2p.py, train/train_caellum_lora.py
+#          (and data/gen_teacher.py, data/roughen.py share most of these).
+#
+# Install on Colab:
+#     pip install -r train/requirements-train.txt
+# (On Colab, torch is usually preinstalled with the right CUDA build — if the pinned
+#  torch below conflicts with the runtime's CUDA, drop the torch line and keep the rest.)
+
+torch==2.3.1
+torchvision==0.18.1
+
+diffusers==0.29.2
+transformers==4.41.2
+accelerate==0.31.0
+peft==0.11.1
+datasets==2.20.0
+safetensors==0.4.3
+huggingface-hub==0.23.4
+
+pillow==10.3.0
+opencv-python==4.10.0.84
+numpy==1.26.4

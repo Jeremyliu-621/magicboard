@@ -1,0 +1,9 @@
+# CAELLUM serve deps (Neuron box / AWS workshop env) — used by serve.py.
+#
+# Compile and serve share ONE environment on the Neuron box: torch-neuronx, neuronx-cc,
+# optimum-neuron, diffusers, controlnet-aux, rembg, fastapi, uvicorn are all installed once
+# (see setup_neuron.sh). So this file just pulls in the pinned compile+serve env below —
+# there are no serve-only extras worth diverging on.
+#
+# Install:  pip install -r requirements-serve.txt   (from services/caellum/)
+-r requirements-neuron.txt

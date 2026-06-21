@@ -1,0 +1,27 @@
+# CAELLUM — Neuron box (AWS workshop inf2 / Code Editor) pip deps for COMPILE + SERVE.
+#
+# ENV: the AWS Neuron workshop / inf2 instance ONLY. No CUDA. Installed on top of
+# the workshop's existing Neuron SDK by setup_neuron.sh.
+#
+# IMPORTANT: torch-neuronx, neuronx-cc, torch_xla, libneuronxla and the aws-neuronx-*
+# runtime/tools come PRE-INSTALLED from the workshop DLAMI/SDK. We do NOT pin or
+# reinstall them here — doing so can break the matched runtime/compiler/driver set.
+# `pip install -r` this file with the Neuron pip index already configured by the env.
+#
+# The workshop box runs a RECENT Neuron SDK (e.g. torch 2.9), so we do NOT hard-pin
+# optimum-neuron to an old release — that would fight the pre-installed torch-neuronx. We
+# let pip install a version compatible with the installed SDK, and let optimum-neuron resolve
+# its own diffusers/transformers. RULE: pip must NOT up/downgrade torch / torch-neuronx — if
+# it tries to, stop and report (the SDK runtime/compiler/driver set must stay matched).
+
+optimum-neuron               # Neuron Stable Diffusion / ControlNet pipelines + optimum-cli export neuron
+diffusers==0.35.*            # optimum-neuron 0.4.3 REQUIRES diffusers 0.35.x; its ControlNet pipeline fails to import on 0.38+
+transformers                 # let optimum-neuron pull its required range (~4.57 for 0.4.3)
+accelerate                   # model loading helpers used during from_pretrained
+controlnet-aux               # scribble / canny preprocessors for the control image (serve side)
+rembg                        # background removal -> RGBA sprite (serve side)
+fastapi                      # /enhance + /healthz HTTP app (serve side)
+uvicorn                      # ASGI server for serve.py
+pillow                       # PNG decode/encode, image resize to SHAPE
+numpy                        # leave the box's pre-installed numpy as-is; do NOT force <2 (this box ships numpy 2.x with torch 2.9)
+onnxruntime                  # rembg's U2Net inference backend (CPU)

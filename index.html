@@ -171,8 +171,10 @@
        never get served stale by the browser's heuristic cache. (file:// loads plain.) -->
   <script>
     (function () {
+      // union of both branches: friend's MagicBoard creation modules + our AI/graph/draw modules. main last.
       var files = ['rng', 'draw', 'stageReferenceData', 'data', 'character', 'skin', 'finishers', 'ultimateRecorder', 'effects', 'audio', 'input', 'physics',
-        'fighter', 'stage', 'modes', 'game', 'net', 'editor', 'createOverlay', 'levelPreview', 'worldLibrary', 'magicBoardGame', 'main'];
+        'fighter', 'stage', 'modes', 'game', 'net', 'editor', 'createOverlay', 'levelPreview', 'worldLibrary', 'magicBoardGame',
+        'mechanics', 'graph', 'prop', 'ai', 'drawpad', 'campad', 'main'];
       var http = location.protocol === 'http:' || location.protocol === 'https:';
       var bust = http ? '?v=' + Date.now() : '';
       for (var i = 0; i < files.length; i++) {
