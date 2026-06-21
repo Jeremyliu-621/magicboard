@@ -133,6 +133,24 @@
       label = label || 'gun';
       return this.spawnFromStrokes(placeholder(label), label, x != null ? x : v.w * 0.5, y != null ? y : 150);
     },
+
+    // dev/testing: spawn a prop driven by a hand-authored mechanic GRAPH (no CHLOE needed) so the
+    // composable engine can be smoke-tested in the browser. key indexes EXAMPLE_GRAPHS.
+    devSpawnGraph: function (key, x, y) {
+      const game = DS.game;
+      if (!game || !game.props) { if (global.__showErr) global.__showErr('devSpawnGraph: start a match first'); return null; }
+      const v = game.view || { w: 1920, h: 1080 };
+      const g = EXAMPLE_GRAPHS[key]; if (!g) return null;
+      return this.spawnFromStrokes(placeholder(g.label), g.label, x != null ? x : v.w * 0.5, y != null ? y : 150, { mechanic: g.graph });
+    },
+  };
+
+  // hand-authored demo graphs for the dev keys — exercise hit/land composition + elements w/o CHLOE.
+  const EXAMPLE_GRAPHS = {
+    frost: { label: 'gun', graph: { kind: 'graph', archetype: 'graph', name: 'Frost Cannon', tags: ['ice'],
+      on: { fire: [{ op: 'projectile', speed: 1100, damage: 7 }], hit: [{ op: 'status', kind: 'freeze', dur: 3 }, { op: 'aoe', radius: 70, damage: 6 }] } } },
+    cluster: { label: 'bomb', graph: { kind: 'graph', archetype: 'graph', name: 'Cluster Bomb', tags: ['fire'],
+      on: { fire: [{ op: 'projectile', speed: 760, gravity: 1500, angle: 22, damage: 6 }], land: [{ op: 'nova', count: 8, damage: 6 }, { op: 'aoe', radius: 90, damage: 12 }] } } },
   };
 
   // --- helpers ---
@@ -218,7 +236,10 @@
   // work with zero AI connected — DS.Mechanics.defaultFor() already tags spikes->hazard, spring->bouncy.
   global.addEventListener('keydown', function (e) {
     if (e.repeat) return;
+    if (!(DS.game && DS.game.state === 'playing')) return;
     const label = { Digit1: 'gun', Digit2: 'sword', Digit3: 'bomb', Digit4: 'spikes', Digit5: 'spring' }[e.code];
-    if (label && DS.game && DS.game.state === 'playing') AI.devSpawnProp(label);
+    if (label) return void AI.devSpawnProp(label);
+    const gk = { Digit6: 'frost', Digit7: 'cluster' }[e.code];   // graph items: 6=Frost Cannon 7=Cluster Bomb
+    if (gk) AI.devSpawnGraph(gk);
   });
 })(window);
