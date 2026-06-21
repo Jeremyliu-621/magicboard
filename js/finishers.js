@@ -56,8 +56,8 @@
     return hashText([name || (ch && ch.name) || 'character', stable(ch && ch.skin ? ch.skin : null), RENDER_VERSION].join('|'));
   }
 
-  function cacheKey(attackerId, style, victimId, skinHash, sourceType, motionHash) {
-    return [attackerId, style, victimId, skinHash, sourceType || 'pikaffects_image', motionHash || '', MODEL].join('|');
+  function cacheKey(attackerId, style, victimId, skinHash, sourceType, motionHash, finisherKind) {
+    return [attackerId, style, victimId, skinHash, sourceType || 'pikaffects_image', finisherKind || '', motionHash || '', MODEL].join('|');
   }
 
   function customUltimateKey(playerId, characterId, skinHash, motionHash, style) {
@@ -81,6 +81,72 @@
     return cv.toDataURL('image/png');
   }
 
+  // ---- item-based finisher (the FIRST item a fighter picks up imprints a finisher) -----------------
+  // map the item's element -> a Pika canned effect whose motion already reads as the KO + an action line.
+  const ITEM_FX = {
+    fire: 'Explode', electric: 'Explode', bomb: 'Explode',
+    ice: 'Dissolve', water: 'Dissolve', light: 'Dissolve',
+    poison: 'Melt', dark: 'Melt',
+    plant: 'Crumble', metal: 'Crumble', rock: 'Crumble',
+    wind: 'Tear',
+  };
+  const ITEM_ACTION = {
+    fire: 'A fireball engulfs the opponent, who bursts into ash.',
+    water: 'A torrent washes over the opponent, who dissolves away.',
+    ice: 'A freezing blast shatters the opponent into frost.',
+    electric: 'A lightning bolt blows the opponent apart.',
+    plant: 'Vines crush the opponent into dust.',
+    poison: 'Toxic sludge melts the opponent away.',
+    metal: 'A heavy strike smashes the opponent to pieces.',
+    rock: 'The opponent is crushed and crumbles to rubble.',
+    light: 'A radiant burst disintegrates the opponent.',
+    dark: 'Shadow consumes the opponent, who melts away.',
+    wind: 'A gale tears the opponent apart.',
+  };
+  function itemFinisherSpec(element, itemLabel, holderName, victimName, holderSide) {
+    const el = (element || '').toLowerCase();
+    const style = ITEM_FX[el] || 'Explode';
+    const item = itemLabel || el || 'weapon';
+    const action = ITEM_ACTION[el] || ('The ' + (holderSide || 'left') + ' fighter finishes the opponent with the ' + item + '.');
+    const prompt = 'Two simple hand-drawn black marker doodle fighters on a warm paper background (keep both fighters, keep the scene). '
+      + action + ' Keep the marker line art and paper background; do not redesign the characters, do not add realistic detail. Short, dramatic KO finisher.';
+    return { style: style, prompt: prompt };
+  }
+
+  // snapshot the LIVE game canvas (already shows both fighters + the styled scene) -> data URL for Pika.
+  function captureGameScreenshot(game) {
+    const src = game && game.canvas;
+    if (!src || !src.width || !src.height) return null;
+    const scale = Math.min(1, 768 / Math.max(src.width, src.height));
+    const w = Math.max(1, Math.round(src.width * scale)), h = Math.max(1, Math.round(src.height * scale));
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = D.COL.paper; ctx.fillRect(0, 0, w, h);
+    try { ctx.drawImage(src, 0, 0, w, h); } catch (e) { return null; }
+    return cv.toDataURL('image/png');
+  }
+
+  // start a background Pika job for "holder uses itemLabel to finish victim", styled to the live scene.
+  // Returns the generate() promise ({key, job}). Fire-and-forget from the pickup hook.
+  function generateItemFinisher(game, holder, victim, itemLabel, element) {
+    if (!holder || !holder.ch || !victim || !victim.ch) return Promise.resolve(null);
+    const img = captureGameScreenshot(game);
+    if (!img) return Promise.resolve(null);
+    const spec = itemFinisherSpec(element, itemLabel, holder.name, victim.name, holder.x <= victim.x ? 'left' : 'right');
+    return generate(holder.name, victim.name, {
+      style: spec.style, imageDataUrl: img, prompt: spec.prompt,
+      finisherKind: 'item', sourceType: 'pikaffects_image',
+    });
+  }
+
+  // the ready item-finisher clip for a holder (keyed by the cache key stored on the fighter at pickup).
+  function findReadyItemClip(holder) {
+    if (!holder || !holder.ch || !holder.finisherCacheKey) return null;
+    const finisher = ensure(holder.ch);
+    const clip = finisher.clips && finisher.clips[holder.finisherCacheKey];
+    return clip && clip.videoUrl ? Object.assign({ key: holder.finisherCacheKey }, clip) : null;
+  }
+
   async function submitJob(attackerId, victimId, victimSkinHashValue, style, imageDataUrl, options) {
     options = options || {};
     const response = await fetch(apiUrl('/finishers/jobs'), {
@@ -97,6 +163,8 @@
         keyframeDataUrls: options.keyframeDataUrls || [],
         motionSummary: options.motionSummary || null,
         skinHash: options.skinHash || null,
+        prompt: options.prompt || null,             // item finisher: tailored two-character prompt
+        finisherKind: options.finisherKind || null, // 'item' -> separate cache from ultimate-KO finishers
       }),
     });
     if (!response.ok) throw new Error('finisher job failed: ' + response.status);
@@ -166,7 +234,7 @@
     }));
     const key = sourceType === 'doodle_keyframes' && options.playerId != null
       ? customUltimateKey(options.playerId, attackerId, skinHash, motionHash, style)
-      : cacheKey(attackerId, style, victimId, skinHash, sourceType, sourceType === 'pikaffects_image' ? '' : motionHash);
+      : cacheKey(attackerId, style, victimId, skinHash, sourceType, sourceType === 'pikaffects_image' ? '' : motionHash, options.finisherKind || '');
     const imageDataUrl = options.imageDataUrl || renderCharacterDataUrl(victim || attacker);
     const job = await submitJob(attackerId, victimId || 'custom-ultimate', skinHash, style, imageDataUrl, Object.assign({}, options, { sourceType, motionHash, skinHash }));
     storeJob(attacker, key, victimId || 'custom-ultimate', skinHash, style, job, Object.assign({}, options, { sourceType, motionHash, skinHash, characterId: attackerId }));
@@ -267,5 +335,9 @@
     findReadyClip,
     videoForClip,
     preloadForGame,
+    itemFinisherSpec,
+    captureGameScreenshot,
+    generateItemFinisher,
+    findReadyItemClip,
   };
 })(window);

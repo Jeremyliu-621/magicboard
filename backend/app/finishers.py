@@ -27,6 +27,11 @@ KEYFRAME_PROMPT_TEMPLATE = (
     "Keep the black marker line art, paper background, proportions, and character identity. "
     "Make the move read as a powerful {style} finishing attack, with clear anticipation, impact, and recovery."
 )
+ITEM_FINISHER_PROMPT_TEMPLATE = (
+    "Two simple hand-drawn black marker doodle fighters on a warm paper background (keep both, keep the "
+    "scene). {action} Keep the marker line art and paper background; do not add realistic detail, do not "
+    "redesign the characters. Short, dramatic KO finisher."
+)
 NEGATIVE_PROMPT = "realism, 3D, extra limbs, redesign, detailed face, photorealism"
 
 
@@ -69,6 +74,7 @@ def _cache_key(request: FinisherJobRequest) -> str:
             request.victim_skin_hash,
             request.skin_hash or "",
             request.source_type,
+            request.finisher_kind or "",
             motion_hash,
             model,
         ]
@@ -241,7 +247,8 @@ def _pikaffects_payload(request: FinisherJobRequest) -> dict[str, Any]:
     payload = {
         "image_url": request.image_data_url,
         "pikaffect": request.style,
-        "prompt": PROMPT_TEMPLATE.format(style=request.style),
+        # item finishers pass a tailored two-character prompt; ultimate-KO finishers use the template.
+        "prompt": request.prompt or PROMPT_TEMPLATE.format(style=request.style),
         "negative_prompt": NEGATIVE_PROMPT,
     }
     return payload

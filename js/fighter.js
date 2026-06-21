@@ -43,6 +43,13 @@
       this.action = null; this.hitstun = 0; this.shielding = false; this.crouching = false;
       this.invuln = 1.0; this.respawnT = 0; this.dead = false;
       this.heldProp = null; // a picked-up drawn item (DS.Prop); fire it with the attack button
+      // item FINISHER: the FIRST item you ever pick up imprints a Pika KO video (see prop.js / finishers.js).
+      this.hasPickedUpItem = false;  // one-shot: only the first pickup arms a finisher
+      this.finisherItem = null;      // { label, element }
+      this.finisherCacheKey = null;  // key into ch.finisher.clips once the job is created
+      this.finisherClip = null;      // resolved {videoUrl,...} once the video is buffered
+      this.finisherReady = false;    // true once buffered -> green aura
+      this.finisherUsed = false;     // spent after one elimination
       this.dropPlat = null; this.dropTimer = 0;
       this.animPhase = Math.random() * 6; this.blinkTimer = 1 + Math.random() * 3; this.blinkUntil = 0;
       this.expr = '';
@@ -821,6 +828,20 @@
           ctx.globalAlpha = (0.17 - k * 0.06) + 0.035 * pulse;
           ctx.lineWidth = (6 - k * 2) * this.scale;
           const rr = (30 + k * 16) * this.scale * (1 + 0.035 * pulse);
+          ctx.beginPath(); ctx.ellipse(0, 0, rr * 0.82, rr, 0, 0, 6.2832); ctx.stroke();
+        }
+        ctx.restore();
+      }
+      // item FINISHER armed: a bright GREEN halo (faster pulse, distinct from the blue ult halo and from
+      // P1's green tag colour). Shows once the Pika clip is buffered; press the finisher key in range to fire.
+      if (this.finisherReady && !this.finisherUsed) {
+        const gp = 0.5 + 0.5 * Math.sin(this.animPhase * 3.2);
+        ctx.save();
+        ctx.translate(0, -10); ctx.strokeStyle = '#2fcf63';
+        for (let k = 0; k < 2; k++) {
+          ctx.globalAlpha = (0.32 - k * 0.1) + 0.12 * gp;
+          ctx.lineWidth = (7 - k * 2) * this.scale;
+          const rr = (32 + k * 16) * this.scale * (1 + 0.07 * gp);
           ctx.beginPath(); ctx.ellipse(0, 0, rr * 0.82, rr, 0, 0, 6.2832); ctx.stroke();
         }
         ctx.restore();

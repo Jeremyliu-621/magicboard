@@ -197,6 +197,22 @@
         if (Math.abs(f.x - p.x) < (f.w + p.w) / 2 && Math.abs(f.y - p.y) < (f.h + p.h) / 2) {
           f.heldProp = p; p.held = f; p.vx = 0; p.vy = 0;
           if (game.effects) game.effects.charge(f.x, f.y - 6, f.tagCol);
+          // FIRST item ever -> imprint a FINISHER: kick off a background Pika video (fire-and-forget).
+          // Read the label/element BEFORE any consumable handling below consumes the prop.
+          if (!f.hasPickedUpItem && DS.Finishers && DS.Finishers.generateItemFinisher) {
+            f.hasPickedUpItem = true;
+            const element = (p.mechanic && p.mechanic.element)
+              || (DS.Mechanics && DS.Mechanics.elementOf && DS.Mechanics.elementOf(p.label)) || null;
+            f.finisherItem = { label: p.label, element: element };
+            const opps = (game.world && game.world.opponents) ? game.world.opponents(f) : [];
+            let victim = null, best = Infinity;
+            for (const o of opps) { if (o.dead) continue; const d = Math.hypot(o.x - f.x, o.y - f.y); if (d < best) { best = d; victim = o; } }
+            if (victim) {
+              Promise.resolve(DS.Finishers.generateItemFinisher(game, f, victim, p.label, element))
+                .then(function (r) { if (r && r.key) f.finisherCacheKey = r.key; })
+                .catch(function () { /* generation failed -> no aura; normal play continues */ });
+            }
+          }
           // graph `pickup` trigger (heal/buff/shield). A pure consumable (no `fire`) is used up at once.
           if (DS.Graph && DS.Graph.isGraph(p.mechanic) && p.mechanic.on && p.mechanic.on.pickup) {
             DS.Graph.run(p.mechanic, 'pickup', { world: game.world, holder: f, x: f.x, y: f.y, facing: f.facing });

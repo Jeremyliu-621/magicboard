@@ -374,10 +374,59 @@
       const finisher = this.finisher;
       if (!finisher || finisher.done) return;
       finisher.done = true;
-      try { finisher.video.pause(); } catch (_error) { /* ignore media cleanup errors */ }
+      try { if (finisher.video) finisher.video.pause(); } catch (_error) { /* ignore media cleanup errors */ }
       this.finisher = null;
       this.state = 'playing';
-      if (finisher.victim && finisher.victim._completeKO) finisher.victim._completeKO(finisher.world);
+      const v = finisher.victim;
+      if (!v) return;
+      if (finisher.item) {
+        // ITEM finisher: instant FULL elimination (lose all lives)
+        if (v.heldProp) { v.heldProp.held = null; v.heldProp = null; }
+        v.stocks = 0; v.dead = true; v.respawnT = 0;
+        if (finisher.world && finisher.world.onChange) finisher.world.onChange();
+      } else if (v._completeKO) {
+        v._completeKO(finisher.world);   // ultimate-KO finisher: one stock (unchanged)
+      }
+    }
+
+    // item-based finisher (parallel to tryStartFinisher; does NOT touch the ultimate-KO path).
+    tryStartItemFinisher(attacker, victim, world) {
+      if (!DS.Finishers || this.state !== 'playing' || this.finisher) return false;
+      if (!attacker || !victim || victim.dead || attacker === victim || !attacker.finisherReady) return false;
+      const clip = attacker.finisherClip || (DS.Finishers.findReadyItemClip && DS.Finishers.findReadyItemClip(attacker));
+      if (!clip) return false;
+      const video = DS.Finishers.videoForClip(clip);
+      if (!video) return false;
+      this.finisher = { victim, world, attacker, clip, video, t: 0, maxT: 6.5, done: false, item: true, phase: 'camera', camT: 0 };
+      this.state = 'finisher';
+      this.effects.shake(0.3);
+      return true;
+    }
+
+    _playFinisherVideo() {
+      const fin = this.finisher;
+      if (!fin || !fin.video) { this._completeFinisher(); return; }
+      const video = fin.video;
+      this.effects.shake(0.45);
+      try { video.pause(); video.currentTime = 0; } catch (_error) { /* stale media seek */ }
+      video.onended = () => this._completeFinisher();
+      video.onerror = () => this._completeFinisher();
+      const played = video.play();
+      if (played && played.catch) played.catch(() => this._completeFinisher());
+    }
+
+    // armed holder pressed the finisher key while in range of an opponent -> start the item finisher
+    _checkItemFinishers(input) {
+      if (this.demo || this.finisher || !input || !input.player) return;
+      for (let i = 0; i < this.fighters.length; i++) {
+        const f = this.fighters[i];
+        if (!f.finisherReady || f.finisherUsed || f.dead) continue;
+        const inp = input.player(i);
+        if (!inp || !inp.pressFinisher) continue;
+        let victim = null, best = Infinity;
+        for (const o of this.fighters) { if (o === f || o.dead) continue; const d = Math.hypot(o.x - f.x, o.y - f.y); if (d < best) { best = d; victim = o; } }
+        if (victim && best <= 130 && this.tryStartItemFinisher(f, victim, this.world)) { f.finisherUsed = true; break; }
+      }
     }
 
     update(dt, input) {
@@ -386,10 +435,24 @@
       if (DS.Input.pressed('KeyP')) this.togglePause();
 
       if (this.state === 'finisher') {
-        if (this.finisher) {
-          this.finisher.t += Math.min(dt, 0.05);
-          const video = this.finisher.video;
-          if (video.ended || this.finisher.t > this.finisher.maxT) this._completeFinisher();
+        const fin = this.finisher;
+        if (fin) {
+          if (fin.item && fin.phase === 'camera') {
+            // cinematic push-in framing both fighters BEFORE the video plays (~0.6s)
+            fin.camT += Math.min(dt, 0.05);
+            const a = fin.attacker, v = fin.victim, cam = this.cam;
+            if (cam && a && v) {
+              const tx = (a.x + v.x) / 2, ty = (a.y + v.y) / 2 - 24;
+              const tz = Math.max(1, Math.min(2.0, this.view.w / (Math.abs(a.x - v.x) + 540)));
+              const r = Math.min(1, dt * 4.5);
+              cam.cx += (tx - cam.cx) * r; cam.cy += (ty - cam.cy) * r; cam.zoom += (tz - cam.zoom) * r;
+            }
+            if (fin.camT >= 0.6) { fin.phase = 'video'; this._playFinisherVideo(); }
+          } else {
+            fin.t += Math.min(dt, 0.05);
+            const video = fin.video;
+            if (!video || video.ended || fin.t > fin.maxT) this._completeFinisher();
+          }
         }
         this.effects.update(dt);
         return;
@@ -422,6 +485,7 @@
       } else {
         for (let i = 0; i < this.fighters.length; i++) this.fighters[i].update(dt, input.player(i), this.world);
       }
+      this._checkItemFinishers(input);   // armed holder + finisher key + in range -> cinematic KO
       this._resolveBodies();
       this._updateProjectiles(dt);
       if (this.props) {
@@ -447,7 +511,21 @@
       if (this._finisherPollT > 0) return;
       this._finisherPollT = 2.2;
       this._finisherPolling = true;
-      const done = () => { this._finisherPolling = false; if (DS.Finishers) DS.Finishers.preloadForGame(this); };
+      const done = () => {
+        this._finisherPolling = false;
+        if (!DS.Finishers) return;
+        DS.Finishers.preloadForGame(this);
+        // resolve item-finisher readiness: the GREEN aura appears once the clip is actually buffered
+        if (DS.Finishers.findReadyItemClip) {
+          for (const f of this.fighters) {
+            if (!f.hasPickedUpItem || f.finisherReady || !f.finisherCacheKey) continue;
+            const clip = DS.Finishers.findReadyItemClip(f);
+            if (!clip || !clip.videoUrl) continue;
+            const v = DS.Finishers.videoForClip(clip);
+            if (v && v.readyState >= 2) { f.finisherClip = clip; f.finisherReady = true; }
+          }
+        }
+      };
       try {
         const result = DS.Finishers.refreshPendingForGame(this);
         if (result && result.then) result.then(done, done);

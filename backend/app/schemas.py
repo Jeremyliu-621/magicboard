@@ -275,6 +275,10 @@ class FinisherJobRequest(BaseModel):
     keyframe_data_urls: list[str] = Field(default_factory=list, alias="keyframeDataUrls")
     motion_summary: dict[str, Any] | None = Field(default=None, alias="motionSummary")
     skin_hash: str | None = Field(default=None, alias="skinHash")
+    # item-based finisher: an item-specific prompt override + a kind tag so item finishers cache
+    # separately from the ultimate-KO finishers (same attacker/victim/style otherwise collide).
+    prompt: str | None = Field(default=None, alias="prompt")
+    finisher_kind: str | None = Field(default=None, alias="finisherKind")
 
 
 class FinisherJobResponse(BaseModel):

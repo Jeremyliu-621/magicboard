@@ -31,7 +31,7 @@
       name: name, color: color,
       mv: { left: false, right: false, up: false, down: false },
       aim: 0, aimT: 0, sdir: 0,
-      latch: { left: false, right: false, jab: false, special: false, jump: false, drop: false, dash: 0 },
+      latch: { left: false, right: false, jab: false, special: false, jump: false, drop: false, dash: 0, finisher: false },
       // lobby choices the phone makes for itself (mirrored into the host lobby UI)
       skin: null, ult: 'hammer', ready: false,
     };
@@ -95,6 +95,8 @@
         case 'special': pl.latch.special = true; pl.aim = d.aim || 0; pl.aimT = AIM_FRAMES; pl.sdir = d.dir || 0; break;
         case 'jump': pl.latch.jump = true; break;
         case 'dash': pl.latch.dash = d.dir < 0 ? -1 : 1; break;
+        case 'finisher': pl.latch.finisher = true; break;     // item-finisher trigger
+
         // lobby (pre-match) choices the phone makes for itself — refresh the lobby UI live
         case 'skin': pl.skin = d.skin || null; this._emit(); break;
         case 'ult': pl.ult = d.ult || 'hammer'; this._emit(); break;
@@ -146,6 +148,7 @@
         holdAttack: false, holdSpecial: false,
         specialDir: pl.latch.special ? pl.sdir : 0,            // octagon: L/R half fires that way
         dash: pl.latch.dash,                                   // explicit dash command (-1/0/1)
+        pressFinisher: pl.latch.finisher,                      // item-finisher trigger (phone button)
       };
     },
 
@@ -153,7 +156,7 @@
     update() {
       for (const slot in this.players) {
         const pl = this.players[slot], L = pl.latch;
-        L.left = L.right = L.jab = L.special = L.jump = L.drop = false; L.dash = 0;
+        L.left = L.right = L.jab = L.special = L.jump = L.drop = L.finisher = false; L.dash = 0;
         if (pl.aimT > 0) pl.aimT--;
       }
     },
@@ -165,6 +168,7 @@
     left: false, right: false, up: false, down: false, shield: false,
     pressLeft: false, pressRight: false, pressUp: false, pressDown: false,
     pressAttack: false, pressSpecial: false, holdAttack: false, holdSpecial: false, specialDir: 0, dash: 0,
+    pressFinisher: false,
   };
 
   Net.MAX = MAX;
