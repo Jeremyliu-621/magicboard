@@ -1,0 +1,16 @@
+# CAELLUM local serve (services/caellum/serve_local.py) — vanilla diffusers, NO Trainium.
+# Mac (Apple Silicon MPS) / any CUDA GPU / CPU. First run downloads SD1.5 (~4GB) + scribble
+# ControlNet (~1.4GB) from Hugging Face.
+#
+# On Mac: a recent torch wheel has MPS support out of the box.
+torch>=2.1
+diffusers>=0.27
+transformers>=4.38
+accelerate>=0.27
+peft>=0.10            # only if you pass --lora (runtime LoRA load)
+safetensors>=0.4
+pillow
+numpy
+starlette
+uvicorn
+controlnet-aux        # only used by the sdxl/canny path; harmless to install
