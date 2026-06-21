@@ -36,7 +36,7 @@ const FAL_PIPELINE = (process.env.FAL_PIPELINE || 'recraft').toLowerCase();
 const FAL_GEN_MODE = (process.env.FAL_GEN_MODE || 'text').toLowerCase();
 const FAL_GEN_MODEL_T2I = 'fal-ai/recraft/v3/text-to-image';
 const FAL_GEN_MODEL_I2I = 'fal-ai/recraft/v3/image-to-image';
-const FAL_RMBG_MODEL = 'fal-ai/birefnet/v2';
+const FAL_RMBG_MODEL = 'fal-ai/bria/background/remove'; // saliency cutout (handles patterned backgrounds)
 // Recraft style + how far it may stray from the kid's drawing (0 = identical .. 1 = ignore it).
 // digital_illustration/hand_drawn fits the doodle world; vector_illustration/bold_stroke is flatter.
 // Both are env-tunable so we can dial the look without code edits.
@@ -193,10 +193,18 @@ async function falEnhance(req, res) {
     }
     if (!genUrl) return sendJson(res, 502, { error: 'fal returned no image' });
 
-    // Return the RAW generated image. The CLIENT isolates the object (drops the plain background AND
-    // the stray decoration blobs Recraft scatters around it) with a fast connected-components pass —
-    // BiRefNet's salient-object cutout grabbed the wrong region on thin-lined doodles, so it's gone.
-    const sprite_b64 = await fetchB64(genUrl, ctrl.signal);
+    // stage 2: Bria background removal (saliency) — removes the patterned/scene backgrounds that
+    // Recraft's hand_drawn style scatters and that a connected-components pass can't (stripes/grid/
+    // rain reach the frame edge). Best-effort: keep the raw image if it fails. The CLIENT then drops
+    // any leftover DETACHED decoration blobs (rain dashes, sparkles) via keep-largest in _isolateDoodle.
+    let spriteUrl = genUrl;
+    try {
+      const cut = await falPost(FAL_RMBG_MODEL, { image_url: genUrl }, key, ctrl.signal);
+      const u = (cut && cut.image && cut.image.url) || (cut && cut.images && cut.images[0] && cut.images[0].url);
+      if (u) spriteUrl = u;
+    } catch (e) { /* keep the un-cut image rather than failing the whole enhance */ }
+
+    const sprite_b64 = await fetchB64(spriteUrl, ctrl.signal);
     return sendJson(res, 200, { sprite_b64 });
   } catch (e) {
     if (e && e.name === 'AbortError') return sendJson(res, 504, { error: 'fal request timed out' });
