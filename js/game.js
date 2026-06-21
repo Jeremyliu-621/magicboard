@@ -145,6 +145,9 @@
         if (p.hp != null) p._hp = p.hp;
         if (p.move) this._posMove(p, 0);
         if (p.fire) { p._fireT = p.fire.delay != null ? p.fire.delay : 0; p._flash = 0; } // cannons stagger via delay
+        // a spikes platform is a stage hazard — fill in its damage/knockback config (merge so a
+        // map/editor can override any field). Contact handling lives in `_updateStage`.
+        if (p.kind === 'spikes') p.hurt = Object.assign({ damage: 26, kbBase: 40, kbScale: 0.18, cooldown: 0.6 }, p.hurt || {});
         // a hand-drawn platform collides as the stroke itself → world-space line segments
         if (p.kind === 'drawn' && p.pts && p.pts.length > 1) {
           p._segs = [];
@@ -243,6 +246,24 @@
               break;
             }
           }
+        }
+      }
+      // spikes: a hazard platform that hurts anyone touching it. Heavy damage + knockback on a
+      // per-fighter cooldown, routed through the normal hit pipeline with no attacker, then the
+      // fighter is launched up and away off the slab (so they don't sit in it).
+      for (const f of this.fighters) if (f._hurtCd > 0) f._hurtCd -= dt;
+      for (const p of st.platforms) {
+        if (p.kind !== 'spikes' || !p.hurt) continue;
+        const top = p.y - 16; // reach up to the spike tips above the slab
+        for (const f of this.fighters) {
+          if (f.dead || f.respawnT > 0 || f.invuln > 0 || f._hurtCd > 0) continue;
+          const hw = f.w / 2, hh = f.h / 2;
+          if (f.x + hw <= p.x || f.x - hw >= p.x + p.w || f.y + hh <= top || f.y - hh >= p.y + p.h) continue;
+          const h = p.hurt, dir = f.x < p.x + p.w / 2 ? -1 : 1; // fling away from the slab's centre
+          f._hurtCd = h.cooldown != null ? h.cooldown : 0.6;
+          f._takeHit({ damage: h.damage, kbBase: h.kbBase, kbScale: h.kbScale, angle: 72 }, dir, null, this.world);
+          this.effects.groundSpikes(Math.max(p.x, Math.min(p.x + p.w, f.x)), p.y, 1.1);
+          this.effects.shake(0.4);
         }
       }
     }
@@ -479,9 +500,43 @@
           }
         }
         if (struck) continue;
-        // fizzle on a solid platform (and chip a breakable crate/structure on the way out)
+        // hit a solid platform. a `bounce` projectile (the bomb) RICOCHETS off the surface
+        // Mario-style — reflecting its velocity with restitution — until its bounces run out;
+        // everything else just fizzles. (pass-through platforms are ignored either way.)
         for (const p of plats) {
-          if (!p.pass && pr.x > p.x && pr.x < p.x + p.w && pr.y > p.y && pr.y < p.y + p.h) {
+          if (p.pass) continue;
+          const maxB = pr.cfg.bounce || 0;
+          if (maxB) {
+            // circle-vs-AABB so the ball ricochets off the face instead of sinking in
+            const cx = Math.max(p.x, Math.min(pr.x, p.x + p.w));
+            const cy = Math.max(p.y, Math.min(pr.y, p.y + p.h));
+            let dx = pr.x - cx, dy = pr.y - cy;
+            const inside = dx * dx + dy * dy < 1e-6;
+            if (!inside && dx * dx + dy * dy > pr.r * pr.r) continue; // no contact this frame
+            if (p._hp != null) this.damageBox(p, pr.cfg.damage || 6);  // still chips crates
+            if ((pr.bounced || 0) < maxB) {
+              pr.bounced = (pr.bounced || 0) + 1;
+              let n;
+              if (inside) { // deep penetration: eject out the shallowest face
+                const toL = pr.x - p.x, toR = p.x + p.w - pr.x, toT = pr.y - p.y, toB = p.y + p.h - pr.y, m = Math.min(toL, toR, toT, toB);
+                if (m === toT) { n = { x: 0, y: -1 }; pr.y = p.y - pr.r; }
+                else if (m === toB) { n = { x: 0, y: 1 }; pr.y = p.y + p.h + pr.r; }
+                else if (m === toL) { n = { x: -1, y: 0 }; pr.x = p.x - pr.r; }
+                else { n = { x: 1, y: 0 }; pr.x = p.x + p.w + pr.r; }
+              } else {
+                const len = Math.hypot(dx, dy) || 1; n = { x: dx / len, y: dy / len };
+                pr.x = cx + n.x * pr.r; pr.y = cy + n.y * pr.r; // sit on the surface
+              }
+              const REST = 0.84, vdotn = pr.vx * n.x + pr.vy * n.y;
+              pr.vx = (pr.vx - 2 * vdotn * n.x) * REST;
+              pr.vy = (pr.vy - 2 * vdotn * n.y) * REST;
+              this.effects.impact(pr.x, pr.y, 0.4); this.effects.shake(0.08);
+              if (DS.Audio) DS.Audio.play('box_hit', { x: pr.x });
+              struck = true; break;
+            }
+            // out of bounces → detonate where it lands
+            this.effects.impact(pr.x, pr.y, 0.7); pr.dead = true; struck = true; break;
+          } else if (pr.x > p.x && pr.x < p.x + p.w && pr.y > p.y && pr.y < p.y + p.h) {
             if (p._hp != null) this.damageBox(p, pr.cfg.damage || 6);
             else if (DS.Audio) DS.Audio.play('fizzle', { x: pr.x });
             this._graphLand(pr);   // bomb/thrown graph projectile lands on a platform -> on.land (explode)
@@ -692,6 +747,7 @@
       DS.stage.drawBackground(ctx, this.stage, cam, home);
       this._renderBlastBorder(ctx);
       DS.stage.drawStage(ctx, this.stage, cam, home);
+      if (DS.CreateOverlay) DS.CreateOverlay.renderView(ctx, this);
       if (this.mode.renderWorld) this.mode.renderWorld(this, ctx);
       for (const f of this.fighters) f.render(ctx, this.world);
       this._renderProjectiles(ctx);
@@ -708,6 +764,7 @@
       ctx.scale(this.scale, this.scale);
       this._hud(ctx);
       this._overlay(ctx);
+      if (DS.CreateOverlay) DS.CreateOverlay.renderHud(ctx, this);
       // dev: tiny indicator while the overview zoom is engaged
       if (this.devZoom) {
         const U = this._u();
@@ -885,11 +942,25 @@
     }
 
     _face(ctx, ch, rnd) {
-      D.circle(ctx, 0, 0, 17, { width: 4.5, color: D.COL.ink, rnd });
-      ctx.strokeStyle = D.COL.ink; ctx.lineWidth = 3.5; ctx.lineCap = 'round';
+      const ink = D.COL.ink;
+      // Oski the Bear: ears + big eyes + a muzzle (mini version of character.js bearFace)
+      if (ch.head === 'bear') {
+        for (const s of [-1, 1]) { const ex = s * 11; D.circle(ctx, ex, -13, 6.8, { width: 4, color: ink, rnd, fill: D.COL.paper }); D.curve(ctx, [[ex - 3.4, -12.5], [ex, -9.5], [ex + 3.4, -12.5]], { width: 2, color: ink, rnd }); } // ears + inner curve
+        D.circle(ctx, 0, 0, 17, { width: 4.5, color: ink, rnd });
+        D.ellipse(ctx, 0, 6, 5, 4, { width: 3, color: ink, rnd, fill: D.COL.paper }); // muzzle
+        for (const s of [-1, 1]) { // big glossy eyes
+          ctx.fillStyle = ink; ctx.beginPath(); ctx.ellipse(s * 6, -1, 3.4, 4.4, 0, 0, 7); ctx.fill();
+          ctx.fillStyle = D.COL.paper; ctx.beginPath(); ctx.ellipse(s * 6 + s * 0.6, -2.6, 1.5, 1.7, 0.4, 0, 7); ctx.fill();
+        }
+        ctx.fillStyle = ink; for (const s of [-1, 1]) { ctx.save(); ctx.translate(s * 5, -8.5); ctx.rotate(s * -0.22); ctx.beginPath(); ctx.ellipse(0, 0, 1.8, 0.9, 0, 0, 7); ctx.fill(); ctx.restore(); } // eyebrows
+        ctx.fillStyle = ink; ctx.beginPath(); ctx.ellipse(0, 4.3, 2.1, 1.5, 0, 0, 7); ctx.fill(); // nose
+        return;
+      }
+      D.circle(ctx, 0, 0, 17, { width: 4.5, color: ink, rnd });
+      ctx.strokeStyle = ink; ctx.lineWidth = 3.5; ctx.lineCap = 'round';
       for (const ex of [-4, 4]) { ctx.beginPath(); ctx.moveTo(ex, -2); ctx.lineTo(ex, 4); ctx.stroke(); }
-      if (ch.head === 'spikes') for (let i = -1; i <= 1; i++) D.line(ctx, i * 7, -14, i * 10, -26, { width: 4, color: D.COL.ink, rnd, passes: 1 });
-      else if (ch.head === 'beanie') { D.line(ctx, -13, -10, 13, -10, { width: 4, color: D.COL.ink, rnd, passes: 1 }); D.circle(ctx, 0, -20, 4, { width: 3.5, color: D.COL.ink, rnd }); }
+      if (ch.head === 'spikes') for (let i = -1; i <= 1; i++) D.line(ctx, i * 7, -14, i * 10, -26, { width: 4, color: ink, rnd, passes: 1 });
+      else if (ch.head === 'beanie') { D.line(ctx, -13, -10, 13, -10, { width: 4, color: ink, rnd, passes: 1 }); D.circle(ctx, 0, -20, 4, { width: 3.5, color: ink, rnd }); }
     }
 
     _heart(ctx, x, y, s, filled, rnd) {
@@ -910,10 +981,11 @@
       ctx.fillStyle = D.COL.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       if (this.state === 'ready') {
         const map = DS.Maps.get(this.mapId);
+        const mapName = (this.stage && this.stage.name) || map.name;
         ctx.font = (52 * U) + "px 'Gloria Hallelujah', cursive";
         ctx.fillText(this.mode.name, vw / 2, vh / 2 - 56 * U);
         ctx.font = (26 * U) + "px 'Patrick Hand', cursive";
-        ctx.fillText(map.name + '  ·  ' + this.mode.win, vw / 2, vh / 2 - 18 * U);
+        ctx.fillText(mapName + '  ·  ' + this.mode.win, vw / 2, vh / 2 - 18 * U);
         ctx.font = (34 * U) + "px 'Patrick Hand', cursive";
         const vs = this.fighters.length <= 2
           ? this.fighters[0].name + '  vs  ' + this.fighters[1].name

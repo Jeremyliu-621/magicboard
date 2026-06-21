@@ -53,6 +53,13 @@
 
     activate() { this.active = true; this.panel.hidden = false; this.charName = this.data.roster[0]; this.build(); }
     deactivate() { this.active = false; this.panel.hidden = true; }
+    editWorldStage(world) {
+      this.subtab = 'stage';
+      this.editMap = (world && (world.mapId || world.id)) || this.game.mapId || 'meadow';
+      this.selPlat = null; this.selPortal = null; this.drag = null; this.platStroke = null; this.platDraw = false;
+      if (DS.WorldLibrary && DS.WorldLibrary.ensureWorldStage && world) DS.WorldLibrary.ensureWorldStage(world);
+      this.activate();
+    }
 
     queueSave() { clearTimeout(this._saveTimer); this._saveTimer = setTimeout(() => DS.Store.save(), 250); }
 
@@ -109,7 +116,7 @@
 
       // head style
       const hrow = el('div', 'ed-row'); hrow.appendChild(el('label', '', 'Head'));
-      const hsel = el('select'); ['spikes', 'beanie', 'tuft', 'none'].forEach((h) => { const o = el('option', '', h); o.value = h; if (ch.head === h) o.selected = true; hsel.appendChild(o); });
+      const hsel = el('select'); ['bear', 'spikes', 'beanie', 'tuft', 'none'].forEach((h) => { const o = el('option', '', h); o.value = h; if (ch.head === h) o.selected = true; hsel.appendChild(o); });
       hsel.onchange = () => { ch.head = hsel.value; this.queueSave(); }; hrow.appendChild(hsel); p.appendChild(hrow);
 
       // action selector
@@ -228,7 +235,12 @@
       // map picker — EVERY stage is editable, not just Meadow
       const mrow = el('div', 'ed-row'); mrow.appendChild(el('label', '', 'Map'));
       const msel = el('select');
-      DS.Maps.list().forEach((m) => { const o = el('option', '', m.name); o.value = m.id; if (m.id === this.editMap) o.selected = true; msel.appendChild(o); });
+      const maps = DS.Maps.list().slice();
+      if (!maps.some((m) => m.id === this.editMap)) {
+        const custom = DS.Maps.get(this.editMap);
+        maps.unshift({ id: this.editMap, name: (this._stage() && this._stage().name) || custom.name || 'Custom Level' });
+      }
+      maps.forEach((m) => { const o = el('option', '', m.name); o.value = m.id; if (m.id === this.editMap) o.selected = true; msel.appendChild(o); });
       msel.onchange = () => { this.editMap = msel.value; this.selPlat = null; this.build(); };
       mrow.appendChild(msel); p.appendChild(mrow);
 
@@ -247,6 +259,7 @@
       mkb('+ platform', () => this._addPlat(st, {}));
       mkb('+ cannon', () => this._addPlat(st, { w: 86, h: 52, kind: 'cannon', pass: false, fire: { deg: 0, every: 2.0, speed: 880, damage: 11, kbBase: 32, kbScale: 0.12, r: 26, delay: 0 } }));
       mkb('+ bouncy', () => this._addPlat(st, { w: 360, h: 60, kind: 'trampoline', pass: false, bounce: 1300 }));
+      mkb('+ spikes', () => this._addPlat(st, { w: 260, h: 44, kind: 'spikes', pass: false, hurt: { damage: 26, kbBase: 40, kbScale: 0.18, cooldown: 0.6 } }));
       mkb('+ portal', () => this._addPortalPair(st));
       mkb('− selected', () => {
         if (this.selPortal) { const pt = this.selPortal; st.portals = (st.portals || []).filter((q) => q !== pt && q.id !== pt.link && q.link !== pt.id); this.selPortal = null; }
@@ -297,6 +310,19 @@
     }
 
     _buildPlatProps(p, st, pl) {
+      // a DRAWN platform keeps its shape (drag to move / corner to resize on the canvas) — here it
+      // gets a "type" that restyles it (and Bouncy makes it springy), not the rectangle kinds.
+      if (pl.kind === 'drawn') {
+        p.appendChild(el('h3', '', 'Drawn platform'));
+        const trow = el('div', 'ed-row'); trow.appendChild(el('label', '', 'type'));
+        const tsel = el('select');
+        [['ledge', 'Ledge'], ['wood', 'Wood'], ['stone', 'Stone'], ['crystal', 'Crystal'], ['bouncy', 'Bouncy']].forEach(([v, label]) => { const o = el('option', '', label); o.value = v; if ((pl.style || 'ledge') === v) o.selected = true; tsel.appendChild(o); });
+        tsel.onchange = () => { pl.style = tsel.value; if (pl.style === 'bouncy') { if (pl.bounce == null) pl.bounce = 1300; } else delete pl.bounce; this.queueSave(); this.build(); };
+        trow.appendChild(tsel); p.appendChild(trow);
+        if (pl.style === 'bouncy') this._slider(p, 'bounce', 400, 2200, 20, () => pl.bounce, (v) => pl.bounce = v);
+        p.appendChild(el('div', 'ed-note', 'Keeps its drawn shape; the type changes how it looks. Bouncy springs you up. Drag it on the canvas to move; drag the corner to resize.'));
+        return;
+      }
       p.appendChild(el('h3', '', 'Selected platform'));
       this._num(p, 'x', 1, () => Math.round(pl.x), (v) => pl.x = v);
       this._num(p, 'y', 1, () => Math.round(pl.y), (v) => pl.y = v);
@@ -305,11 +331,12 @@
       // kind — also turns a platform into a cannon / trampoline (and back)
       const krow = el('div', 'ed-row'); krow.appendChild(el('label', '', 'kind'));
       const ksel = el('select');
-      ['ground', 'wood', 'stone', 'crystal', 'box', 'float', 'cannon', 'trampoline', 'drawn'].forEach((k) => { const o = el('option', '', k); o.value = k; if ((pl.kind || 'wood') === k) o.selected = true; ksel.appendChild(o); });
+      ['ground', 'wood', 'stone', 'crystal', 'box', 'float', 'cannon', 'trampoline', 'spikes'].forEach((k) => { const o = el('option', '', k); o.value = k; if ((pl.kind || 'wood') === k) o.selected = true; ksel.appendChild(o); });
       ksel.onchange = () => {
         const k = ksel.value; pl.kind = k;
         if (k === 'cannon') { if (!pl.fire) pl.fire = { deg: 0, every: 2.0, speed: 880, damage: 11, kbBase: 32, kbScale: 0.12, r: 26, delay: 0 }; pl.pass = false; } else delete pl.fire;
         if (k === 'trampoline') { if (pl.bounce == null) pl.bounce = 1300; pl.pass = false; } else delete pl.bounce;
+        if (k === 'spikes') { if (!pl.hurt) pl.hurt = { damage: 26, kbBase: 40, kbScale: 0.18, cooldown: 0.6 }; pl.pass = false; } else delete pl.hurt;
         this.queueSave(); this.build();
       };
       krow.appendChild(ksel); p.appendChild(krow);
@@ -333,6 +360,14 @@
         p.appendChild(el('h3', '', 'Trampoline'));
         this._slider(p, 'bounce', 400, 2200, 20, () => pl.bounce, (v) => pl.bounce = v);
         p.appendChild(el('div', 'ed-note', 'Minimum launch height; a harder landing still flings you higher.'));
+      }
+      if (pl.hurt) {
+        p.appendChild(el('h3', '', 'Spikes (hazard)'));
+        this._slider(p, 'damage', 1, 60, 1, () => pl.hurt.damage, (v) => pl.hurt.damage = v);
+        this._slider(p, 'knockback', 4, 80, 1, () => pl.hurt.kbBase, (v) => pl.hurt.kbBase = v);
+        this._slider(p, 'kb growth', 0, 0.4, 0.01, () => pl.hurt.kbScale, (v) => pl.hurt.kbScale = v);
+        this._slider(p, 'hit cooldown (s)', 0.1, 2, 0.05, () => pl.hurt.cooldown, (v) => pl.hurt.cooldown = v);
+        p.appendChild(el('div', 'ed-note', 'Touching this platform deals heavy damage + knockback, then flings the fighter off.'));
       }
       if (pl.move) p.appendChild(el('div', 'ed-note', 'This platform MOVES (' + pl.move.type + '); its motion path is preset.'));
     }
@@ -362,6 +397,9 @@
       this._slider(p, 'knockback', 0.4, 2.2, 0.05, () => s.knockbackScale, (v) => s.knockbackScale = v);
       this._slider(p, 'hitstop', 0, 2, 0.1, () => s.hitstop, (v) => s.hitstop = v);
       p.appendChild(el('div', 'ed-note', 'Tip: lower gravity + higher knockback = floatier, more dramatic launches.'));
+      p.appendChild(el('h3', '', 'Scenery'));
+      this._slider(p, 'dressing', 0, 2, 0.1, () => (s.scenery == null ? 1 : s.scenery), (v) => s.scenery = v);
+      p.appendChild(el('div', 'ed-note', 'Auto-grows pillars under platforms + plants on top from the layout (cosmetic). 0 = off. Updates live as you draw/move platforms.'));
     }
 
     _export() {
@@ -530,7 +568,7 @@
       ctx.restore();
       ctx.fillStyle = D.COL.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
       ctx.font = "26px 'Gloria Hallelujah', cursive";
-      ctx.fillText('Editing: ' + DS.Maps.get(this.editMap).name, cssW / 2, 34);
+      ctx.fillText('Editing: ' + (st.name || DS.Maps.get(this.editMap).name), cssW / 2, 34);
     }
     // dashed boxes + resize nubs on platforms, dotted circles on spawns (sizes kept ~constant on screen)
     _renderStageHandles(ctx, st, sv) {

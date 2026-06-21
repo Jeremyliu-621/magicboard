@@ -22,5 +22,18 @@ data/quickdraw/
 *.pt
 .venv-caellum/
 
+# MagicBoard (friend's branch) local/runtime artifacts
+AGENTS.md
+**/AGENTS.md
+TODO.md
+backend/.venv/
+backend/.pytest_cache/
+backend/**/__pycache__/
+.pytest_cache/
+.uv-cache/
+draw-client/node_modules/
+draw-client/dist/
+draw-client/.npm-cache/
+
 # secrets
 .env

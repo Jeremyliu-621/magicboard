@@ -155,8 +155,9 @@
 
   // ---- default content -----------------------------------------------------
   function defaults() {
+    const stageReference = DS.stageReference || { view: VIEW, platforms: [] };
     return {
-      version: 3,
+      version: 4,
       view: { w: VIEW.w, h: VIEW.h },
       settings: {
         gravity: 2300,
@@ -164,18 +165,15 @@
         stocks: 3,
         knockbackScale: 1.0,
         hitstop: 1.0,
+        scenery: 1.0, // procedural "dressing" density (pillars/plants under+on platforms); 0 = off
+
         // generous KO bounds so fighters fly way out before dying (the dynamic camera
         // zooms out to follow them); ~1100px of margin around the 1920x1080 stage.
         blast: { left: -1100, right: VIEW.w + 1100, top: -900, bottom: VIEW.h + 950 },
       },
       stage: {
-        platforms: [
-          // [x, y(top), w, h, passthrough] — laid out in the 1920x1080 view
-          { x: 225,  y: 863, w: 1470, h: 195, pass: false }, // main ground
-          { x: 143,  y: 705, w: 353,  h: 39,  pass: true },  // left float
-          { x: 768,  y: 468, w: 384,  h: 39,  pass: true },  // center-high float
-          { x: 1425, y: 705, w: 353,  h: 39,  pass: true },  // right float
-        ],
+        // [x, y(top), w, h, passthrough] — laid out in the 1920x1080 view
+        platforms: clone(stageReference.platforms),
         spawns: [ { x: 660, y: 780 }, { x: 1260, y: 780 } ],
         // background structures (drawn behind, faded for depth) — rolling hills + a far ridge
         bg: [
@@ -199,8 +197,9 @@
         ],
       },
       characters: {
-        Sprout: makeCharacter('Sprout', 'spikes', '#5b8c5a'),
-        Acorn: makeCharacter('Acorn', 'beanie', '#9c6b3f'),
+        // the built-in fighters are Oski the Bear (UC Berkeley's mascot) — same rig, bear head
+        Sprout: makeCharacter('Sprout', 'bear', '#5b8c5a'),
+        Acorn: makeCharacter('Acorn', 'bear', '#9c6b3f'),
       },
       roster: ['Sprout', 'Acorn'],
     };
@@ -240,7 +239,15 @@
   function mergeDefaults(d) {
     const base = defaults();
     if (!d || typeof d !== 'object') return base;
+    const targetVersion = base.version;        // capture before Object.assign overwrites base.version
     const out = Object.assign(base, d);
+    // one-time (saves before v4): the built-in fighters became Oski the Bear. flip the old
+    // built-in heads to 'bear' once, without touching characters the user deliberately changed.
+    if ((d.version || 0) < 4) {
+      if (out.characters && out.characters.Sprout && out.characters.Sprout.head === 'spikes') out.characters.Sprout.head = 'bear';
+      if (out.characters && out.characters.Acorn && out.characters.Acorn.head === 'beanie') out.characters.Acorn.head = 'bear';
+    }
+    out.version = targetVersion;
     out.settings = Object.assign(base.settings, d.settings || {});
     // blast bounds are derived from the view and not user-editable, so always take the
     // current defaults (lets existing saves pick up the bigger KO bounds)

@@ -1,0 +1,23 @@
+[project]
+name = "magicboard-backend"
+version = "0.1.0"
+description = "FastAPI backend for Magic Board iPad drawing snapshot persistence."
+readme = "../README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "certifi>=2025.11.12",
+    "fastapi>=0.115.0",
+    "pillow>=12.2.0",
+    "pydantic>=2.8.0",
+    "uvicorn[standard]>=0.30.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.27.0",
+    "pytest>=8.2.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -41,7 +41,20 @@
   }
 
   function head(ctx, cx, cy, r, headType, facing, expr, blink, col, rnd) {
+    // Oski the Bear: big round ears at the top corners (behind the head), each with an
+    // inner-ear curve — then a glossy-eyed, browed, muzzled chibi face.
+    if (headType === 'bear') {
+      const re = r * 0.4, ey0 = cy - r * 0.76;
+      for (const s of [-1, 1]) {
+        const exC = cx + s * r * 0.64;
+        D.circle(ctx, exC, ey0, re, { width: 5, color: col, rnd, fill: D.COL.paper });   // outer ear
+        D.curve(ctx, [[exC - re * 0.5, ey0 + re * 0.06], [exC, ey0 + re * 0.52], [exC + re * 0.5, ey0 + re * 0.06]], { width: 3, color: col, rnd }); // inner-ear curve
+      }
+    }
+
     D.circle(ctx, cx, cy, r, { width: 5.5, color: col, rnd, wob: 1.2 });
+
+    if (headType === 'bear') { bearFace(ctx, cx, cy, r, facing, expr, blink, col, rnd); return; }
 
     // face (eyes biased toward facing)
     const ex = cx + facing * 4.5, ey = cy + 1, gap = 7;
@@ -74,6 +87,51 @@
       D.circle(ctx, cx, cy - r - 4, 4, { width: 4, color: col, rnd });
     } else if (headType === 'tuft') {
       D.curve(ctx, [[cx - 4, cy - r + 4], [cx + 2, cy - r - 8], [cx + 9, cy - r + 2]], { width: 4.5, color: col, rnd });
+    }
+  }
+
+  // Oski's face (chibi, matching the reference): a small light muzzle with a rounded nose +
+  // tiny smile, two BIG glossy oval eyes with highlights, and little curved eyebrows.
+  function bearFace(ctx, cx, cy, r, facing, expr, blink, col, rnd) {
+    const fb = facing * r * 0.03;
+    // --- muzzle (light snout) sits low-centre, behind the nose ---
+    const mx = cx + fb, my = cy + r * 0.36, mrx = r * 0.3, mry = r * 0.24;
+    D.ellipse(ctx, mx, my, mrx, mry, { width: 3.5, color: col, rnd, fill: D.COL.paper, wob: 1 });
+
+    // --- big glossy eyes ---
+    const gap = r * 0.35, eyy = cy - r * 0.05, erx = r * 0.2, ery = r * 0.26;
+    for (const s of [-1, 1]) {
+      const exC = cx + fb + s * gap;
+      if (blink || expr === 'shield') {                 // happy closed eye (downward arc)
+        D.curve(ctx, [[exC - erx, eyy], [exC, eyy + ery * 0.55], [exC + erx, eyy]], { width: 3.5, color: col, rnd });
+      } else if (expr === 'hurt') {                      // X eyes
+        D.line(ctx, exC - erx * 0.7, eyy - ery * 0.6, exC + erx * 0.7, eyy + ery * 0.6, { width: 3.5, color: col, rnd, passes: 1 });
+        D.line(ctx, exC + erx * 0.7, eyy - ery * 0.6, exC - erx * 0.7, eyy + ery * 0.6, { width: 3.5, color: col, rnd, passes: 1 });
+      } else {
+        ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(exC, eyy, erx, ery, 0, 0, 7); ctx.fill();          // big black eye
+        ctx.fillStyle = D.COL.paper;
+        ctx.beginPath(); ctx.ellipse(exC + facing * erx * 0.15, eyy - ery * 0.36, erx * 0.46, ery * 0.4, 0.4, 0, 7); ctx.fill(); // big upper catchlight
+        ctx.beginPath(); ctx.arc(exC - facing * erx * 0.28, eyy + ery * 0.38, erx * 0.17, 0, 7); ctx.fill();  // tiny lower sparkle
+      }
+    }
+
+    // --- eyebrows (little curved ovals up top) — drop them when hurt ---
+    if (expr !== 'hurt') {
+      ctx.fillStyle = col;
+      for (const s of [-1, 1]) {
+        ctx.save(); ctx.translate(cx + fb + s * gap * 0.82, eyy - ery - r * 0.13); ctx.rotate(s * -0.22);
+        ctx.beginPath(); ctx.ellipse(0, 0, r * 0.1, r * 0.045, 0, 0, 7); ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    // --- nose + mouth on the muzzle ---
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.ellipse(mx, my - mry * 0.28, mrx * 0.42, mry * 0.34, 0, 0, 7); ctx.fill();   // rounded nose
+    if (expr === 'attack') {
+      ctx.beginPath(); ctx.ellipse(mx, my + mry * 0.42, mrx * 0.32, mry * 0.4, 0, 0, 7); ctx.fill();  // open mouth
+    } else {                                              // tiny smile under the nose
+      D.curve(ctx, [[mx - mrx * 0.46, my + mry * 0.22], [mx, my + mry * 0.56], [mx + mrx * 0.46, my + mry * 0.22]], { width: 2.5, color: col, rnd });
     }
   }
 
@@ -147,6 +205,43 @@
       ctx.translate(0, -6); ctx.scale(dir, 1); ctx.rotate(rot);
       D.line(ctx, 0, 8, 0, -HL, { width: 6, color: ink, rnd, passes: 1 }); // handle
       D.strokePts(ctx, [[-14, -HL - 1], [16, -HL - 1], [16, -HL - 21], [-14, -HL - 21]], { width: 5, color: ink, rnd, closed: true, fill: opts.headFill || D.COL.paperShade }); // head
+    } else if (kind === 'bat') {
+      // a baseball bat: thin grip+knob at the hands, tapering up to a fat rounded barrel.
+      // pivots at the grip (the hands). swing 0 = cocked up over the shoulder (behind),
+      // 1 = swung all the way through to in-front. `angle` overrides for a static carry pose.
+      const sw = opts.swing == null ? 0 : opts.swing, BL = 64;
+      const rot = opts.angle != null ? opts.angle : -0.6 + sw * 3.5; // over-shoulder → through-forward → all the way down
+      ctx.translate(0, -6); ctx.scale(dir, 1); ctx.rotate(rot);
+      D.strokePts(ctx, [[-4, 4], [4, 4], [9, -BL], [-9, -BL]], { width: 5, color: ink, rnd, closed: true, fill: opts.headFill || D.COL.paperShade }); // tapered barrel (grip at origin)
+      D.circle(ctx, 0, -BL, 9, { width: 4, color: ink, rnd, fill: opts.headFill || D.COL.paperShade }); // rounded end
+      D.circle(ctx, 0, 8, 6, { width: 4, color: ink, rnd, fill: D.COL.paper }); // grip knob
+      D.line(ctx, -5, 0, 5, 0, { width: 3, color: ink, rnd, passes: 1 }); // tape line
+    } else if (kind === 'rifle') {
+      // an AK-style assault rifle: long receiver + barrel, wood stock, pistol grip, front
+      // sight, and the signature CURVED banana magazine. (the Blaster prop.)
+      ctx.scale(dir, 1); ctx.rotate(-(opts.aim || 0)); ctx.translate(4, -6);
+      D.strokePts(ctx, [[-16, -3], [-40, 1], [-40, 9], [-16, 7]], { width: 5, color: ink, rnd, closed: true, fill: D.COL.paperShade }); // wooden buttstock
+      D.strokePts(ctx, [[-16, -8], [24, -8], [24, 4], [-16, 4]], { width: 5, color: ink, rnd, closed: true, fill: D.COL.paperShade }); // receiver
+      D.strokePts(ctx, [[24, -8], [42, -8], [42, -2], [24, -2]], { width: 4, color: ink, rnd, closed: true, fill: D.COL.paper }); // handguard
+      D.line(ctx, 42, -5, 64, -5, { width: 5, color: ink, rnd, passes: 1 }); // barrel
+      D.line(ctx, 60, -10, 60, -3, { width: 4, color: ink, rnd, passes: 1 }); // front sight post
+      D.strokePts(ctx, [[5, 4], [17, 4], [23, 26], [13, 28]], { width: 5, color: ink, rnd, closed: true, fill: D.COL.paperShade }); // banana magazine
+      D.curve(ctx, [[17, 7], [23, 18], [22, 27]], { width: 3, color: ink, rnd }); // mag curve seam
+      D.strokePts(ctx, [[-11, 4], [-2, 4], [-6, 20], [-15, 19]], { width: 5, color: ink, rnd, closed: true, fill: D.COL.paper }); // pistol grip
+      D.circle(ctx, -4, 9, 5, { width: 3, color: ink, rnd }); // trigger guard
+    } else if (kind === 'shotgun') {
+      // a stubby double-barrel shotgun: two stacked barrels with wide bores, a pump forend,
+      // a chunky wooden stock and a break-action breech. (the Scatter prop.)
+      ctx.scale(dir, 1); ctx.rotate(-(opts.aim || 0)); ctx.translate(8, -6);
+      D.strokePts(ctx, [[-12, -1], [-34, 3], [-34, 13], [-12, 9]], { width: 5, color: ink, rnd, closed: true, fill: D.COL.paperShade }); // wooden buttstock
+      D.strokePts(ctx, [[-12, -9], [5, -9], [5, 9], [-12, 9]], { width: 5, color: ink, rnd, closed: true, fill: D.COL.paperShade }); // breech block
+      D.strokePts(ctx, [[5, -9], [40, -9], [40, -2], [5, -2]], { width: 4.5, color: ink, rnd, closed: true, fill: D.COL.paper }); // top barrel
+      D.strokePts(ctx, [[5, -1], [40, -1], [40, 6], [5, 6]], { width: 4.5, color: ink, rnd, closed: true, fill: D.COL.paper }); // bottom barrel
+      D.circle(ctx, 39, -5, 3.4, { width: 3, color: ink, rnd, fill: ink }); // top bore
+      D.circle(ctx, 39, 2, 3.4, { width: 3, color: ink, rnd, fill: ink }); // bottom bore
+      D.strokePts(ctx, [[14, 6], [30, 6], [30, 11], [14, 11]], { width: 4, color: ink, rnd, closed: true, fill: D.COL.paperShade }); // pump forend
+      D.strokePts(ctx, [[-9, 9], [-1, 9], [-5, 22], [-13, 21]], { width: 5, color: ink, rnd, closed: true, fill: D.COL.paper }); // grip
+      D.circle(ctx, -4, 12, 4.5, { width: 3, color: ink, rnd }); // trigger guard
     } else if (kind === 'spear') {
       // a long shaft thrust straight UP with a big leaf-shaped point at the top + a binding wrap
       const SL = 86; ctx.scale(dir, 1);

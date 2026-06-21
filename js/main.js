@@ -25,23 +25,238 @@
   const editor = new DS.Editor(game, canvas, panel);
   syncSize();
 
+  function setActiveTab(tabName) {
+    document.querySelectorAll('.tab').forEach((tab) => {
+      tab.classList.toggle('active', tab.dataset.tab === tabName);
+    });
+  }
+
+  function hideRuntimeOverlays() {
+    closeHelp();
+    closeMenu();
+    document.getElementById('draw-overlay').hidden = true;
+  }
+
+  function enterLevelPreview(world) {
+    if (!world || !DS.LevelPreview) return;
+    hideRuntimeOverlays();
+    if (worldLibrary) worldLibrary.close();
+    editor.deactivate();
+    mode = 'levelPreview';
+    setActiveTab('');
+    setPreviewSaveState('Save', false);
+    setPreviewApplyState('Auto Apply', true);
+    DS.LevelPreview.enter(world, {
+      onActivity(activeWorld, activity) {
+        if (!activeWorld || !worldLibrary) return;
+        worldLibrary.updateWorld(activeWorld.id, {
+          lastEditedAt: activity && activity.updatedAt ? activity.updatedAt : new Date().toISOString(),
+        });
+      },
+      onSemanticDraft(activeWorld, draft) {
+        autoApplyLevelPreviewSemanticDraft(activeWorld, draft);
+      },
+    });
+  }
+
+  function enterWorldStageEditor(world) {
+    if (!world) return;
+    exitLevelPreview();
+    hideRuntimeOverlays();
+    if (worldLibrary) worldLibrary.close();
+    mode = 'editor';
+    setActiveTab('editor');
+    game.mapId = world.mapId || world.id || 'meadow';
+    if (worldLibrary && worldLibrary.ensureWorldStage) worldLibrary.ensureWorldStage(world);
+    editor.editWorldStage(world);
+  }
+
+  function exitLevelPreview() {
+    if (DS.LevelPreview) DS.LevelPreview.exit();
+  }
+
+  function setPreviewSaveState(label, disabled) {
+    const button = document.getElementById('level-preview-save');
+    if (!button) return;
+    button.textContent = label;
+    button.disabled = !!disabled;
+  }
+
+  function setPreviewApplyState(label, disabled) {
+    const button = document.getElementById('level-preview-apply');
+    if (!button) return;
+    button.textContent = label;
+    button.disabled = !!disabled;
+  }
+
+  function openActiveDrawClient() {
+    if (!DS.LevelPreview || !worldLibrary) return;
+    const activeWorld = DS.LevelPreview.state && DS.LevelPreview.state.world;
+    if (!activeWorld) return;
+    const url = worldLibrary.drawClientUrl(activeWorld);
+    global.open(url, '_blank', 'noopener');
+  }
+
+  async function saveLevelPreviewCapture() {
+    if (!DS.LevelPreview || !worldLibrary) return;
+    const activeWorld = DS.LevelPreview.state && DS.LevelPreview.state.world;
+    const activeRoomId = DS.LevelPreview.state && DS.LevelPreview.state.roomId;
+    if (!activeWorld) return;
+    setPreviewSaveState('Saving...', true);
+    try {
+      const roomCapture = await DS.LevelPreview.saveCapture();
+      if (!DS.LevelPreview.state || DS.LevelPreview.state.world !== activeWorld || DS.LevelPreview.state.roomId !== activeRoomId) {
+        throw new Error('Level changed before save completed.');
+      }
+      const updated = worldLibrary.saveDrawingCapture(activeWorld.id, roomCapture);
+      if (!updated) throw new Error('World save failed.');
+      DS.LevelPreview.state.world = updated;
+      setPreviewSaveState('Saved', true);
+      window.setTimeout(() => setPreviewSaveState('Save', false), 1200);
+    } catch (error) {
+      console.warn('level preview save failed', error);
+      setPreviewSaveState('Save failed', false);
+    }
+  }
+
+  async function applyLevelPreviewSemanticDraft() {
+    if (!DS.LevelPreview || !DS.MagicBoardGame || !worldLibrary) return;
+    const activeWorld = DS.LevelPreview.state && DS.LevelPreview.state.world;
+    if (!activeWorld) return;
+    setPreviewApplyState('Applying...', true);
+    try {
+      let draft = DS.LevelPreview.state.semanticDraft;
+      if (!draft) {
+        const room = await DS.LevelPreview.saveCapture();
+        draft = room.semanticDraft;
+      }
+      const mapId = activeWorld.mapId || 'meadow';
+      const patch = DS.MagicBoardGame.buildPatchFromSemanticDraft(draft, {
+        worldId: activeWorld.id,
+        roomId: activeWorld.roomId || activeWorld.id,
+        mapId,
+        replacePlatforms: false,
+      });
+      if (!patch.operations.length) throw new Error('Confirm at least one object first.');
+      const result = DS.MagicBoardGame.applyPatch(patch, {
+        rebuild() {
+          game.mapId = mapId;
+          game.rebuild();
+        },
+      });
+      if (!result.ok) throw new Error(result.errors.join('; '));
+
+      const updated = syncWorldFromStage(activeWorld, mapId);
+      if (updated) DS.LevelPreview.state.world = updated;
+      setPreviewApplyState('Applied', true);
+      window.setTimeout(() => setPreviewApplyState('Auto Apply', true), 1400);
+    } catch (error) {
+      console.warn('semantic apply failed', error);
+      setPreviewApplyState(error && error.message ? error.message : 'Apply failed', false);
+      window.setTimeout(() => setPreviewApplyState('Auto Apply', true), 2200);
+    }
+  }
+
+  const autoAppliedKeys = new Set();
+  function autoApplyLevelPreviewSemanticDraft(activeWorld, draft) {
+    if (!activeWorld || !draft || !DS.MagicBoardGame || !worldLibrary) return;
+    const key = [
+      activeWorld.id,
+      draft.captureVersion || 0,
+      (draft.answers || []).map((answer) => answer.answerId || answer.candidateId).sort().join('|'),
+    ].join(':');
+    if (autoAppliedKeys.has(key)) return;
+    const patch = DS.MagicBoardGame.buildPatchFromSemanticDraft(draft, {
+      worldId: activeWorld.id,
+      roomId: activeWorld.roomId || activeWorld.id,
+      mapId: activeWorld.mapId || 'meadow',
+      replacePlatforms: false,
+    });
+    if (!patch.operations.length) return;
+    const result = DS.MagicBoardGame.applyPatch(patch, {
+      rebuild() {
+        if (game.mapId === (activeWorld.mapId || 'meadow')) game.rebuild();
+      },
+    });
+    if (!result.ok) {
+      console.warn('semantic auto-apply failed', result.errors);
+      return;
+    }
+    autoAppliedKeys.add(key);
+    const updated = syncWorldFromStage(activeWorld, activeWorld.mapId || 'meadow');
+    if (updated && DS.LevelPreview && DS.LevelPreview.state.world && DS.LevelPreview.state.world.id === updated.id) {
+      DS.LevelPreview.state.world = updated;
+    }
+    setPreviewApplyState('Auto applied', true);
+    window.setTimeout(() => setPreviewApplyState('Auto Apply', true), 1200);
+  }
+
+  function syncWorldFromStage(activeWorld, mapId) {
+    if (!activeWorld || !worldLibrary) return null;
+    const stage = DS.Maps.stageFor(DS.Store.data, mapId);
+    const spawns = (stage.spawns && stage.spawns.length >= 2 ? stage.spawns : [{ x: 660, y: 780 }, { x: 1260, y: 780 }]).slice(0, 2);
+    const characters = (activeWorld.draft && activeWorld.draft.characters && activeWorld.draft.characters.length
+      ? activeWorld.draft.characters
+      : (DS.Store.data.roster || ['Sprout', 'Acorn']).slice(0, 2));
+    return worldLibrary.updateWorld(activeWorld.id, {
+      lastEditedAt: new Date().toISOString(),
+      mapId,
+      draft: {
+        platforms: stage.platforms || [],
+        portals: stage.portals || [],
+        spawns,
+        characters,
+      },
+    });
+  }
+
+  function openHomeLibrary() {
+    if (global.history && global.history.replaceState && global.location.hash !== '#library') {
+      global.history.replaceState(null, '', global.location.pathname + global.location.search + '#library');
+    }
+    exitLevelPreview();
+    closeHelp();
+    closeMenu();
+    document.getElementById('draw-overlay').hidden = true;
+    editor.deactivate();
+    mode = 'play';
+    setActiveTab('');
+    if (game.state === 'playing') game.togglePause();
+    if (worldLibrary) worldLibrary.open();
+    else openMenu();
+  }
+
   // how many fighters a match spawns: one per joined phone (2..6), else 2 for the keyboard.
   // read live at each rebuild so newly-joined phones are included in the next match.
   game.getPlayerCount = () => {
     if (!DS.Net.available()) return 2;
     return Math.max(2, Math.min(6, DS.Net.maxSlot() || 2));
   };
+  const worldLibrary = DS.WorldLibrary && DS.WorldLibrary.init({
+    onEdit(world) {
+      enterLevelPreview(world);
+    },
+    onPlay(world) {
+      exitLevelPreview();
+      if (worldLibrary && worldLibrary.ensureWorldStage) worldLibrary.ensureWorldStage(world);
+      game.modeId = world.modeId || 'smash';
+      game.mapId = world.mapId || world.id || 'meadow';
+      document.querySelector('.tab[data-tab="play"]').click();
+      game.rebuild();
+      game.start();
+    },
+  });
 
   // tabs
   let mode = 'play';
   document.querySelectorAll('.tab').forEach((t) => {
     t.onclick = () => {
-      document.querySelectorAll('.tab').forEach((x) => x.classList.remove('active'));
-      t.classList.add('active');
+      setActiveTab(t.dataset.tab);
       mode = t.dataset.tab;
+      exitLevelPreview();
       // the menu/lobby/draw overlays sit over the stage area — dismiss them when entering the
       // Editor so its canvas (platform dragging etc.) isn't covered
-      if (mode === 'editor') { closeMenu(); document.getElementById('draw-overlay').hidden = true; editor.activate(); }
+      if (mode === 'editor') { closeMenu(); if (worldLibrary) worldLibrary.close(); document.getElementById('draw-overlay').hidden = true; editor.activate(); }
       else { editor.deactivate(); }
     };
   });
@@ -114,6 +329,12 @@
       const c = '#3f6fa0';
       D.strokePts(ctx, [[0, -20], [16, -3], [0, 20], [-16, -3]], { width: 4, color: c, rnd, closed: true, fill: PAPER });
       D.line(ctx, -16, -3, 16, -3, { width: 2.5, color: c, rnd, passes: 1 });
+    } else if (id === 'mayhem') {
+      // a power-up crate with a star — random weapon pick-ups
+      const c = '#c0603a';
+      D.roundedRect(ctx, -18, -16, 36, 34, 5, { width: 4, color: c, rnd, fill: PAPER });
+      const pts = []; for (let i = 0; i < 10; i++) { const r = i % 2 ? 4 : 10, a = i / 10 * 6.283 - Math.PI / 2; pts.push([Math.cos(a) * r, Math.sin(a) * r + 1]); }
+      D.strokePts(ctx, pts, { width: 3, color: c, rnd, closed: true, fill: c });
     } else {
       const c = '#9a6cb0';
       D.circle(ctx, 0, 0, 20, { width: 4, color: c, rnd }); D.circle(ctx, 0, 0, 12, { width: 3, color: c, rnd }); D.circle(ctx, 0, 0, 4, { width: 3, color: c, rnd, fill: c });
@@ -143,6 +364,7 @@
     menuMaps.innerHTML = ''; DS.Maps.list().forEach((m) => menuMaps.appendChild(iconCard('map', m.id, m.name, selMap === m.id, () => { selMap = m.id; if (DS.Audio) DS.Audio.play('ui_move'); buildSetup(); })));
   }
   function openMenu() {
+    if (worldLibrary) worldLibrary.close();
     if (game.state === 'playing') game.togglePause();
     if (DS.Net.available()) { DS.Net.onChange = () => { if (!lobby.hidden) refreshLobby(); }; DS.Net.host(); }
     buildSetup(); lobby.hidden = true; cancelCountdown(); menu.hidden = false;
@@ -331,10 +553,12 @@
     const visL = i === 0 ? 0 : i * colW + slant, visR = i === n - 1 ? lw : (i + 1) * colW + slant, innerW = visR - visL;
     ctx.save();
     ctx.beginPath(); ctx.moveTo(lt, 0); ctx.lineTo(rt, 0); ctx.lineTo(rb, lh); ctx.lineTo(lb, lh); ctx.closePath(); ctx.clip();
-    // background: paper + a player-colour wash (stronger toward the bottom) + a few ember sparks
-    ctx.globalAlpha = a; ctx.fillStyle = D.COL.paper; ctx.fillRect(lt - 10, 0, (rt - lt) + 320, lh);
+    // background: paper + a player-colour wash (stronger toward the bottom) + a few ember sparks.
+    // fill the FULL canvas (the clip already limits it to this column's parallelogram) — a narrow
+    // rect would miss the slanted bottom corner and leave an unfilled wedge along the divider.
+    ctx.globalAlpha = a; ctx.fillStyle = D.COL.paper; ctx.fillRect(0, 0, lw, lh);
     const g = ctx.createLinearGradient(0, 0, 0, lh); g.addColorStop(0, D.mix(D.COL.paper, col, 0.05)); g.addColorStop(1, D.mix(D.COL.paper, col, 0.26));
-    ctx.fillStyle = g; ctx.fillRect(lt - 10, 0, (rt - lt) + 320, lh);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, lw, lh);
     const er = DS.makeRng(f.pIndex * 31 + 7); ctx.fillStyle = col;
     for (let k = 0; k < 12; k++) { ctx.globalAlpha = a * (0.12 + er() * 0.18); const ex = lt + er() * (rt - lt), ey = hb + er() * (lh - hb), es = 1.5 + er() * 3; ctx.beginPath(); ctx.arc(ex, ey, es, 0, 7); ctx.fill(); }
     ctx.globalAlpha = a;
@@ -450,7 +674,26 @@
   document.getElementById('draw-clear').onclick = () => { playerSkins[drawIndex] = DS.skin.emptySkin(); drawHist = []; };
   document.getElementById('draw-done').onclick = closeDraw;
 
+  document.getElementById('brand-home').onclick = () => {
+    if (DS.Audio) DS.Audio.play('ui_confirm');
+    openHomeLibrary();
+  };
   document.getElementById('btn-menu').onclick = () => { if (DS.Audio) DS.Audio.play('ui_confirm'); openMenu(); };
+  document.getElementById('level-preview-library').onclick = () => {
+    openHomeLibrary();
+  };
+  document.getElementById('level-preview-draw').onclick = () => {
+    if (DS.Audio) DS.Audio.play('ui_confirm');
+    openActiveDrawClient();
+  };
+  document.getElementById('level-preview-apply').onclick = () => {
+    if (DS.Audio) DS.Audio.play('ui_confirm');
+    applyLevelPreviewSemanticDraft();
+  };
+  document.getElementById('level-preview-save').onclick = () => {
+    if (DS.Audio) DS.Audio.play('ui_confirm');
+    saveLevelPreviewCapture();
+  };
   document.getElementById('menu-start').onclick = () => { if (DS.Audio) DS.Audio.play('ui_confirm'); openLobby(); };       // Next → lobby
   document.getElementById('lobby-back').onclick = () => { if (DS.Audio) DS.Audio.play('ui_back'); cancelCountdown(); lobby.hidden = true; menu.hidden = false; };
 
@@ -481,7 +724,9 @@
       ctx.setTransform(DS.DPR, 0, 0, DS.DPR, 0, 0);
       const cssW = canvas.clientWidth, cssH = canvas.clientHeight;
 
-      if (mode === 'play') {
+      if (mode === 'levelPreview') {
+        if (DS.LevelPreview) DS.LevelPreview.render(ctx, cssW, cssH);
+      } else if (mode === 'play') {
         // --- dev camera zoom: see the whole arena / blast borders ---
         //  -  zoom out   ·   =  zoom in   ·   0  toggle overview   ·   \  back to auto
         if (DS.Input.pressed('Digit0')) game.devZoom = game.devZoom ? null : 0.3;
@@ -509,8 +754,9 @@
   }
   requestAnimationFrame(frame);
 
-  // expose for debugging
+  // expose for debugging and optional creation overlay bridge
   DS.game = game; DS.editor = editor;
+  if (DS.CreateOverlay) DS.CreateOverlay.init();
 
   // dev self-test: instant projectile + standing-jab vs dash-jab knockback (movement = power)
   if (location.hash === '#combattest') {
@@ -1372,6 +1618,7 @@
     }, 300);
   }
   if (location.hash === '#demo') { game.demo = true; game.start(); }
+  else if (location.hash === '#library') { if (worldLibrary) worldLibrary.open(); else openMenu(); }
   else if (location.hash === '#lobby') openLobby(); // preview the lobby page
   else if (location.hash === '#setup') openMenu();  // preview the setup page
   else if (location.hash === '#draw') { openLobby(); openDraw(0); } // preview the draw pad
@@ -1403,6 +1650,6 @@
     if (parts[2]) editor.action = parts[2];
     document.querySelector('.tab[data-tab="editor"]').click();
   }
-  // fresh load with no dev hash: greet with the main menu (and start hosting a lobby)
-  else if (location.hash === '') openMenu();
+  // fresh load with no dev hash: creation-first Game Library.
+  else if (location.hash === '') { if (worldLibrary) worldLibrary.open(); else openMenu(); }
 })(window);
