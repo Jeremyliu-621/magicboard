@@ -168,8 +168,7 @@ def main() -> None:
         learning_rate=args.lr,
         per_device_train_batch_size=args.batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
-        gradient_checkpointing=True,
-        gradient_checkpointing_kwargs={"use_reentrant": False},  # Neuron needs this; trainer crashes if it's None
+        gradient_checkpointing=False,  # OFF: 0.6B fits without it, and Neuron's checkpoint() passes use_cache/reduction kwargs torch_xla rejects
         warmup_steps=args.warmup_steps,
         logging_steps=args.logging_steps,
         max_length=args.max_seq_len,  # trl 0.24 renamed max_seq_length -> max_length
