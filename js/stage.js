@@ -570,7 +570,7 @@
   const SCN = BG_INK;                 // every dressing mark is the background gray
   const SCN_LEAF = D.mix(SCN, '#3f7a2e', 0.32);          // foliage on top — the gray nudged a touch green (above the line)
   const LEAF_FILL = D.mix(D.COL.paper, '#3f7a2e', 0.12); // faint green fill for plant blobs
-  const STONE_FILL = D.mix(D.COL.paper, SCN, 0.34);      // solid masonry fill for pillars/arches — paper nudged a bit gray
+  const STONE_FILL = D.mix(D.COL.paper, SCN, 0.13);      // solid masonry fill for pillars/arches — paper nudged just slightly gray
   const GAP_MIN = 40, PILLAR_MAX = 700; // a gap beyond PILLAR_MAX reads as floating → island, not pillar
   const TOP_KINDS = ['tuft', 'stalk', 'shrub', 'sprout'];
   const TOP_KINDS_BIG = ['tuft', 'stalk', 'shrub', 'sprout', 'sapling'];
