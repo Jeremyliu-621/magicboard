@@ -21,3 +21,6 @@ data/quickdraw/
 *.npz
 *.pt
 .venv-caellum/
+
+# secrets
+.env
