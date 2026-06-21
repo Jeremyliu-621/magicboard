@@ -26,19 +26,6 @@
     return '#' + ((1 << 24) + (r << 16) + (g << 8) + bl).toString(16).slice(1);
   }
 
-  // material fills: a VERY light wash — at most ~30% of a clean hue mixed into the warm paper, so a
-  // shape reads as "that material" while staying almost monochrome. The ink line still does the work.
-  const wash = (hue, t) => mix(COL.paper, hue, t);
-  COL.mGround = wash('#7cc242', 0.28);   // grass green
-  COL.mWood = wash('#d99a3f', 0.24); // wood tan
-  COL.mStone = wash('#8aa6bd', 0.26);    // blue-grey stone
-  COL.mCrystal = wash('#4ec4bc', 0.24);  // aqua
-  COL.mBox = wash('#dd9a36', 0.24);      // crate tan
-  COL.mFloat = wash('#79bce4', 0.24);    // sky blue
-  COL.leafFill = wash('#82c247', 0.3);   // foliage fill — soft green
-  COL.leaf = mix('#4e8a32', COL.paper, 0.2); // foliage stroke — a clearer green (it's a thin line)
-  COL.stoneSoft = wash('#8197a8', 0.22); // structures (pillars/arches/islands) — faint stone-grey
-
   // ---- level of detail -----------------------------------------------------
   // when the camera is zoomed way out (e.g. 4 players spread across the arena) the faint
   // second "sketch" pass on every stroke is sub-pixel and invisible — so we skip it to halve
