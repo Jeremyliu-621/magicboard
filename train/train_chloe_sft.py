@@ -53,7 +53,12 @@ from __future__ import annotations
 import argparse
 
 # config is the single source of truth (BASE_MODEL, SYSTEM_PROMPT, node_menu, NODES).
-# Run from services/chloe/ (or add it to PYTHONPATH) so this import resolves.
+# This script lives in train/, so Python puts train/ (not services/chloe) on sys.path when run
+# by path. Add services/chloe explicitly so `import config` resolves from anywhere.
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "services" / "chloe"))
 import config
 
 from datasets import load_dataset
