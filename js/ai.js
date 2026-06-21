@@ -335,22 +335,38 @@
     // strokes -> what the AI thinks it is. Resolves to the recognizer response ({results,confident,top})
     // or null. The draw flow uses top.label instead of asking the kid to pick a category.
     recognize: function (strokes) {
-      // prefer the VLM (open-vocab — reads a bare flame as "fire") over the fixed 25-class CNN.
-      if (this.vlmEndpoint) {
-        const image_b64 = stripDataUrl(this._rasterizeUrl(strokes));
-        return fetch(this.vlmEndpoint, {
-          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ image_b64: image_b64 }),
-        }).then(function (r) { return r.json(); })
-          .then(function (out) { return (out && out.results) ? out : null; })
-          .catch(function (e) { if (global.__showErr) global.__showErr('vlm recognize failed: ' + (e && e.message || e)); return null; });
-      }
+      const self = this;
+      // FAST PATH: the local CNN is instant (~0.1s). Use it when it's CONFIDENT; only fall to the
+      // slower cloud VLM (~5s) when the CNN is unsure or absent. Fast for the common 25 things,
+      // open-vocab for everything else. This is the ~5s latency win from the trained recognizer.
+      const cnn = this.recognizerEndpoint ? this._recognizeCnn(strokes) : Promise.resolve(null);
+      return cnn.then(function (r) {
+        if (r && r.confident && r.top && r.top.label) return r;             // confident local hit -> done
+        if (self.vlmEndpoint) return self._recognizeVlm(strokes).then(function (v) { return v || r; });
+        return r;                                                            // no VLM -> best CNN guess (or null)
+      });
+    },
+
+    // the trained 25-class CNN on :8600 — instant, local. Returns {results,confident,top} or null.
+    _recognizeCnn: function (strokes) {
       if (!this.recognizerEndpoint) return Promise.resolve(null);
       const pixels = this._rasterize28(strokes);
       return fetch(this.recognizerEndpoint, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pixels: pixels }),
       }).then(function (r) { return r.json(); })
         .then(function (out) { return (out && out.results) ? out : null; })
-        .catch(function (e) { if (global.__showErr) global.__showErr('recognize failed: ' + (e && e.message || e)); return null; });
+        .catch(function () { return null; });                                // CNN down -> fall through to VLM
+    },
+
+    // the OpenAI vision model on /vlm-recognize — open-vocab, slower. Returns {results,confident,top} or null.
+    _recognizeVlm: function (strokes) {
+      if (!this.vlmEndpoint) return Promise.resolve(null);
+      const image_b64 = stripDataUrl(this._rasterizeUrl(strokes));
+      return fetch(this.vlmEndpoint, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ image_b64: image_b64 }),
+      }).then(function (r) { return r.json(); })
+        .then(function (out) { return (out && out.results) ? out : null; })
+        .catch(function (e) { if (global.__showErr) global.__showErr('vlm recognize failed: ' + (e && e.message || e)); return null; });
     },
 
     // strokes -> a 28x28 grayscale (white ink on black = QuickDraw polarity) as 784 floats in [0,1].
