@@ -188,23 +188,27 @@ def _encode_png_b64(pil_img) -> str:
 
 
 def _cutout_bg(rgb_img):
-    """Make the solid background transparent by keying out the corner colour -> clean RGBA sprite.
+    """Make the connected, solid-ish background transparent -> clean RGBA sprite.
 
-    The prompt forces a flat solid background, so we sample the four corners (which ARE background)
-    and turn every pixel close to that colour transparent. Deterministic, fast, no model download —
-    and unlike rembg it never leaves a grey box around the asset.
+    Flood-fills inward from all four corners with a tolerance, so a flat OR slightly-noisy/grey
+    background is removed as one connected region while the asset's bold outline stops the fill.
+    Far more robust than a per-pixel colour key when the model paints a textured grey background.
     """
     import numpy as np
-    from PIL import Image
+    from PIL import Image, ImageDraw
 
-    rgba = np.array(rgb_img.convert("RGBA"))
-    rgb = rgba[:, :, :3].astype(np.int16)
-    h, w = rgb.shape[:2]
-    corners = np.stack([rgb[0, 0], rgb[0, w - 1], rgb[h - 1, 0], rgb[h - 1, w - 1]])
-    bg = np.median(corners, axis=0)
-    dist = np.abs(rgb - bg).sum(axis=2)          # L1 distance to the background colour
-    rgba[:, :, 3] = np.where(dist < 72, 0, 255).astype(np.uint8)
-    return Image.fromarray(rgba, "RGBA")
+    img = rgb_img.convert("RGB")
+    w, h = img.size
+    SENT = (255, 0, 255)  # magenta sentinel (never occurs in a charcoal doodle)
+    for xy in ((0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)):
+        try:
+            ImageDraw.floodfill(img, xy, SENT, thresh=50)
+        except Exception:
+            pass
+    arr = np.array(img.convert("RGBA"))
+    sent = (arr[:, :, 0] == 255) & (arr[:, :, 1] == 0) & (arr[:, :, 2] == 255)
+    arr[:, :, 3] = np.where(sent, 0, 255).astype(np.uint8)
+    return Image.fromarray(arr, "RGBA")
 
 
 # --------------------------------------------------------------------------------------
