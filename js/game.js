@@ -4,6 +4,26 @@
   const DS = global.DS;
   const D = DS.draw;
   const POOF = 0.26; // seconds for a projectile's fade-out animation
+
+  // per-reaction visual style for element interactions (DS.Graph.react fx -> burst look). col = tint,
+  // pop = intensity, rise = wisps drift up (steam/fire/growth), debris = shards, ult = sharp burst.
+  const GRAPH_FX = {
+    steam:    { col: '#cfe7f5', pop: 0.8, rise: true },
+    mist:     { col: '#cfe7f5', pop: 0.6, rise: true },
+    dilute:   { col: '#bfe6c8', pop: 0.6, rise: true },
+    shock:    { col: '#8fd6ff', pop: 1.2, debris: 7, ult: true, stop: 0.06 },
+    overload: { col: '#8fd6ff', pop: 1.3, debris: 8, ult: true, stop: 0.06 },
+    shatter:  { col: '#bfe9ff', pop: 1.2, debris: 9, ult: true, stop: 0.05 },
+    ignite:   { col: '#ff8a3c', pop: 1.0, debris: 6, rise: true },
+    flare:    { col: '#ff8a3c', pop: 1.0, debris: 6, rise: true },
+    forge:    { col: '#ffb347', pop: 0.9, debris: 4, rise: true },
+    melt:     { col: '#ffae6b', pop: 0.8, debris: 3, rise: true },
+    grow:     { col: '#7fd18a', pop: 0.7, rise: true },
+    frost:    { col: '#cfeeff', pop: 0.7, debris: 4 },
+    rust:     { col: '#b5793c', pop: 0.7, debris: 4 },
+    ground:   { col: '#caa46a', pop: 0.8, debris: 5 },
+    flash:    { col: '#ffffff', pop: 1.6, ult: true, stop: 0.08, shakeBig: true },
+  };
   // per-player colours (markers + HUD cards) so up to 6 fighters read apart at a glance
   const PCOL = ['#5b8c5a', '#c0603a', '#3f6fa0', '#9a6cb0', '#b58a2e', '#3f8f86'];
   // after a winner is decided the match doesn't freeze — it keeps simulating (fighters can
@@ -480,16 +500,20 @@
       this.projectiles = this.projectiles.filter((p) => !p.dead && (p.fade == null || p.fade > 0));
     }
 
-    // the visual for an element reaction (fire+water=fizzle steam, electric+water=shock, ...)
+    // the visual for an element reaction — a distinct colour + burst per reaction family so each
+    // reads instantly (steam puffs up, electricity cracks, fire throws embers, annihilation flashes).
     _reactionFx(r, x, y) {
       const e = this.effects;
-      e.impact(x, y, 1.0); e.shake(0.12);
-      if (r.fx === 'steam' || r.fx === 'mist' || r.fx === 'dilute') e.charge(x, y, '#cfe');
-      else if (r.fx === 'shock' || r.fx === 'overload' || r.fx === 'shatter') { e.ultHit(x, y, 1.1, '#9cf'); e.hitstop(0.05); }
-      else if (r.fx === 'ignite' || r.fx === 'flare' || r.fx === 'melt' || r.fx === 'forge') e.charge(x, y, '#f93');
-      else if (r.fx === 'flash') { e.ultHit(x, y, 1.3, '#fff'); e.hitstop(0.06); }
-      else e.charge(x, y, '#fff');
-      if (e.floatText && r.note) e.floatText(x, y - 22, r.note);   // demo flair: "fizzle", "shock", ...
+      const S = GRAPH_FX[r.fx] || { col: '#ffffff', pop: 0.8 };
+      e.impact(x, y, S.pop);
+      e.charge(x, y, S.col);
+      if (S.ult) e.ultHit(x, y, S.pop, S.col);                          // electric/flash: sharp tonal burst
+      if (S.debris) e.debris(x, y, S.debris, S.pop);                    // shards / embers fly out
+      if (S.rise) for (let i = 0; i < 5; i++) e.aura(x, y - 4, S.col);  // steam / fire / growth wisps up
+      e.shake(S.shakeBig ? 0.3 : 0.12);
+      if (S.stop) e.hitstop(S.stop);
+      if (e.floatText && r.note) e.floatText(x, y - 24, r.note);        // "fizzle", "shock", ...
+      if (DS.Audio) DS.Audio.play('fizzle', { x: x });
     }
 
     // run a graph projectile's on.land effects ONCE, wherever it comes to rest (fighter/platform/life).

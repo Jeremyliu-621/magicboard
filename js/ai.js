@@ -53,14 +53,28 @@
       opts = opts || {};
       const bb = bbox(strokes);
       const prop = new DS.Prop(Object.assign({
-        label: label, strokes: strokes, x: x, y: y,
+        label: label || 'thing', strokes: strokes, x: x, y: y,
         w: clamp(bb.w * (opts.scale || 1.0), 44, 160),
         h: clamp(bb.h * (opts.scale || 1.0), 30, 120),
       }, opts));
       game.props.push(prop);
-      if (this.endpoint) this._enhanceInto(prop, stripDataUrl(this._rasterizeUrl(strokes)), label);
-      if (this.chloeEndpoint) this._mechanicInto(prop, label, opts.description);
+      // AUTO-LABEL: no label given + recognizer connected -> play instantly on a placeholder, let the
+      // recognizer NAME the drawing, then run CAELLUM + CHLOE with the real name. The whole "draw
+      // anything" loop with zero menu. Otherwise use the caller's label as before.
+      if (!label && this.recognizerEndpoint) {
+        const self = this;
+        this.recognize(strokes).then(function (r) { self._applyRecognition(prop, r, strokes, opts); });
+      } else {
+        if (this.endpoint) this._enhanceInto(prop, stripDataUrl(this._rasterizeUrl(strokes)), label);
+        if (this.chloeEndpoint) this._mechanicInto(prop, label, opts.description);
+      }
       return prop;
+    },
+
+    // the canonical "a kid drew something" entry: spawn from strokes and let the recognizer name it
+    // (CAELLUM + CHLOE follow). Just spawnFromStrokes with no label -> the auto-label path above.
+    spawnDrawn: function (strokes, x, y, opts) {
+      return this.spawnFromStrokes(strokes, null, x, y, opts);
     },
 
     // drop a prop from an already-rasterized rough sketch (data URL); the rough image is the
@@ -166,6 +180,20 @@
       const data = ctx.getImageData(0, 0, N, N).data, px = new Array(N * N);
       for (let i = 0; i < N * N; i++) px[i] = data[i * 4] / 255;   // R channel; white ink -> 1
       return px;
+    },
+
+    // a recognition result -> relabel the prop, swap its instant mechanic to match the recognized
+    // type, and fire CAELLUM (sprite) + CHLOE (mechanic graph) with the real name. Progressive: the
+    // prop was already playing on a placeholder; this upgrades it in place when recognition returns.
+    _applyRecognition: function (prop, r, strokes, opts) {
+      const top = r && r.top;
+      const label = (top && top.label) || 'thing';
+      prop.label = label;
+      prop.recognized = top || null;            // {category,label,archetype,element,confidence} for the HUD
+      if (DS.Mechanics) { prop.mechanic = DS.Mechanics.defaultFor(label); prop.archetype = prop.mechanic.archetype; }
+      const desc = (opts && opts.description) || label;
+      if (this.endpoint) this._enhanceInto(prop, stripDataUrl(this._rasterizeUrl(strokes)), label);
+      if (this.chloeEndpoint) this._mechanicInto(prop, label, desc);
     },
 
     // --- dev/testing: spawn a prop with a generated placeholder shape, no iPad needed ---
