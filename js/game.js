@@ -622,6 +622,26 @@
           ctx.restore();
           continue;
         }
+        // a DRAWN weapon's shot: the kid's own creation flies as the projectile (element weapons fire
+        // their sprite, tagged so two elements CLASH via resolveContacts). Handles its own fade-out.
+        if (pr.cfg && pr.cfg.useSprite) {
+          const fk = pr.fade != null ? Math.max(0, pr.fade / POOF) : 1;
+          ctx.save(); ctx.globalAlpha = fk; ctx.translate(pr.x, pr.y);
+          if (pr.facing < 0) ctx.scale(-1, 1);
+          const spr = pr.cfg.sprite;
+          if (spr && spr.complete && spr.naturalWidth) {
+            const s = pr.r * 2.6 * (0.6 + 0.4 * fk);
+            ctx.drawImage(spr, -s / 2, -s / 2, s, s);
+          } else if (pr.cfg.strokes && pr.cfg.strokes.length) {
+            const src = Math.max(pr.cfg.srcW || 60, pr.cfg.srcH || 60), sc = (pr.r * 2.2) / src;
+            ctx.scale(sc, sc);
+            for (const st of pr.cfg.strokes) D.strokePts(ctx, st.pts, { width: st.w || 5, rnd, jitter: 0.5, passes: 1 });
+          } else {
+            D.circle(ctx, 0, 0, pr.r, { width: 4, color: D.COL.ink, rnd, fill: D.COL.paper, wob: 1.5 });
+          }
+          ctx.globalAlpha = 1; ctx.restore();
+          continue;
+        }
         // dissipating: the ball shrinks and fades while little dashes puff outward
         if (pr.fade != null) {
           const k = Math.max(0, pr.fade / POOF);

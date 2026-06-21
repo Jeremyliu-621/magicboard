@@ -42,6 +42,12 @@
       if (Array.isArray(ctx.graph.on.land)) cfg.onLand = ctx.graph.on.land;
       if (ctx.graph.tags && ctx.graph.tags.length) cfg.tags = ctx.graph.tags;
     }
+    // the drawing flies as the shot: carry the prop's sprite/strokes so the engine renders the
+    // projectile AS the kid's creation (not a generic ball). Works for CHLOE-composed weapons too.
+    if (ctx && ctx.prop) {
+      cfg.useSprite = true; cfg.sprite = ctx.prop.sprite || null; cfg.strokes = ctx.prop.strokes || null;
+      cfg.srcW = ctx.prop.w; cfg.srcH = ctx.prop.h;
+    }
     return cfg;
   }
 

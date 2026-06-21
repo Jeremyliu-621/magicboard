@@ -85,7 +85,7 @@
     // composable mechanic GRAPH: run its `fire` trigger (projectiles it spawns carry on.hit/on.land).
     if (DS.Graph && DS.Graph.isGraph(m)) {
       DS.Graph.run(m, 'fire', { world: world, holder: f, aimDeg: aimDeg || 0,
-        x: f.x + f.facing * 30, y: f.y - 6, facing: f.facing, attachTriggers: true });
+        x: f.x + f.facing * 30, y: f.y - 6, facing: f.facing, attachTriggers: true, prop: this });
       if (world.effects) world.effects.dust(f.x + f.facing * 40, f.y, f.facing);
       return;
     }
@@ -104,7 +104,10 @@
       return;
     }
     if (m.kind === 'ranged') {
-      if (world.spawnProjectile) world.spawnProjectile(f, m, aimDeg || 0);
+      // a drawn weapon throws ITSELF: when useSprite is set (element weapons), pass the prop's
+      // sprite/strokes so the projectile renders AS the kid's drawing, not a generic ink ball.
+      const cfg = m.useSprite ? Object.assign({}, m, { sprite: this.sprite, strokes: this.strokes, srcW: this.w, srcH: this.h }) : m;
+      if (world.spawnProjectile) world.spawnProjectile(f, cfg, aimDeg || 0);
       if (world.effects) world.effects.dust(f.x + f.facing * 40, f.y, f.facing);
     } else if (m.kind === 'heal') {
       f.damage = Math.max(0, (f.damage || 0) - (m.amount || 25));
