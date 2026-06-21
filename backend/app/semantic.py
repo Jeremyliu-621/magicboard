@@ -213,6 +213,46 @@ def _compact_glyph_geometry(stroke: dict[str, Any]) -> SemanticGeometry | None:
     return SemanticGeometry(x=_round(bounds["x"] - pad), y=_round(bounds["y"] - pad), w=_round(w), h=_round(h))
 
 
+def _stroke_circle_geometry(stroke: dict[str, Any]) -> tuple[SemanticGeometry, PortalEndpointGeometry] | None:
+    points = stroke.get("points") or []
+    bounds = _bounds_from_points(points)
+    if not bounds or len(points) < 8:
+        return None
+    width = _num(stroke.get("width")) or 6.0
+    w = bounds["w"]
+    h = bounds["h"]
+    if w < 28 or h < 28 or w > 260 or h > 260:
+        return None
+    ratio = w / max(h, 1.0)
+    if ratio < 0.45 or ratio > 2.2:
+        return None
+    first = points[0]
+    last = points[-1]
+    if not all(isinstance(point, dict) for point in (first, last)):
+        return None
+    close_distance = ((float(first.get("x") or 0.0) - float(last.get("x") or 0.0)) ** 2 + (float(first.get("y") or 0.0) - float(last.get("y") or 0.0)) ** 2) ** 0.5
+    if close_distance > max(width * 5.0, min(w, h) * 0.45):
+        return None
+    length = 0.0
+    previous = None
+    for point in points:
+        if not isinstance(point, dict) or not isinstance(point.get("x"), int | float) or not isinstance(point.get("y"), int | float):
+            continue
+        if previous is not None:
+            length += ((float(point["x"]) - previous[0]) ** 2 + (float(point["y"]) - previous[1]) ** 2) ** 0.5
+        previous = (float(point["x"]), float(point["y"]))
+    if length < (w + h) * 1.15:
+        return None
+    pad = max(8.0, width * 1.2)
+    geometry = SemanticGeometry(x=_round(bounds["x"] - pad), y=_round(bounds["y"] - pad), w=_round(w + pad * 2), h=_round(h + pad * 2))
+    endpoint = PortalEndpointGeometry(
+        x=_round(bounds["x"] + w / 2),
+        y=_round(bounds["y"] + h / 2),
+        r=_round(max(30.0, min(90.0, (w + h) / 4))),
+    )
+    return geometry, endpoint
+
+
 def _circle_geometry(shape: dict[str, Any]) -> tuple[SemanticGeometry, PortalEndpointGeometry] | None:
     kind = str(shape.get("kind") or "").lower()
     if kind not in {"ellipse", "oval", "circle"}:
@@ -327,24 +367,24 @@ def _make_candidate(
 
 
 def _visual_hint_choice_id(hint: VisualObservationHint) -> str | None:
+    if hint.kind == "portal_pair" or (hint.kind == "portal_endpoint" and len(hint.source_ids) >= 2):
+        return "portal_pair"
+    if hint.kind == "portal_endpoint":
+        return "portal_endpoint"
+    if hint.kind == "cannon":
+        return "cannon"
+    if hint.kind in {"spikes", "hazard"}:
+        return "spikes"
+    if hint.kind == "decor":
+        return "decor"
+    if hint.kind == "ignore":
+        return "no_ignore"
     behavior = (hint.behavior or "").lower()
     choice_id = CHOICE_ID_BY_BEHAVIOR.get(behavior)
     if choice_id:
         return choice_id
     if hint.kind == "platform":
         return "normal"
-    if hint.kind == "cannon":
-        return "cannon"
-    if hint.kind in {"spikes", "hazard"}:
-        return "spikes"
-    if hint.kind == "portal_endpoint":
-        return "portal_endpoint"
-    if hint.kind == "portal_pair":
-        return "portal_pair"
-    if hint.kind == "decor":
-        return "decor"
-    if hint.kind == "ignore":
-        return "no_ignore"
     return None
 
 
@@ -353,12 +393,17 @@ def _visual_hint_match_score(candidate: SemanticCandidate, hint: VisualObservati
     if not hint_source_ids:
         return 0
     candidate_source_ids = set(candidate.source_ids)
+    bonus = 3 if (
+        candidate.semantic_type == "portal_pair"
+        and hint.kind in {"portal_endpoint", "portal_pair"}
+        and len(hint_source_ids) >= 2
+    ) else 0
     if candidate_source_ids == hint_source_ids:
-        return 3
+        return 3 + bonus
     if candidate_source_ids.issubset(hint_source_ids) or hint_source_ids.issubset(candidate_source_ids):
-        return 2
+        return 2 + bonus
     if candidate_source_ids & hint_source_ids:
-        return 1
+        return 1 + bonus
     return 0
 
 
@@ -372,7 +417,8 @@ def _apply_visual_hints(
     client_id: str | None,
 ) -> None:
     for hint in sorted(hints, key=lambda item: item.confidence, reverse=True):
-        if hint.confidence < 0.74:
+        threshold = 0.55 if hint.kind in {"portal_endpoint", "portal_pair"} else 0.74
+        if hint.confidence < threshold:
             continue
         choice = CHOICE_BY_ID.get(_visual_hint_choice_id(hint) or "")
         if choice is None:
@@ -523,10 +569,28 @@ def build_semantic_draft(
 
     strokes = [stroke for stroke in projection.get("strokes") or [] if isinstance(stroke, dict)]
     for stroke in strokes:
-        geometry = _stroke_geometry(stroke)
         source_id = str(stroke.get("sourceId") or stroke.get("id") or "")
         if not source_id:
             continue
+        circle = _stroke_circle_geometry(stroke)
+        if circle:
+            candidate = _make_candidate(
+                room_id=room_id,
+                world_id=world_id,
+                capture_version=capture_version,
+                client_id=client_id,
+                source_ids=[source_id],
+                geometry=circle[0],
+                extractor="circle",
+                confidence=0.78,
+                answers_by_binding=answers_by_binding,
+                semantic_type="portal_endpoint",
+                portal_endpoints=[circle[1]],
+            )
+            candidates.append(candidate)
+            used_source_ids.add(source_id)
+            continue
+        geometry = _stroke_geometry(stroke)
         if geometry:
             candidate = _make_candidate(
                 room_id=room_id,

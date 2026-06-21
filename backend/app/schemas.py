@@ -9,6 +9,31 @@ from pydantic import BaseModel, ConfigDict, Field
 BACKEND_VERSION = "0.1.0"
 
 
+AgentErrorCode = Literal[
+    "missing_key",
+    "stale_capture",
+    "stale_candidate",
+    "stale_stage_reference",
+    "unknown_candidate",
+    "manual_override_exists",
+    "permission_required",
+    "permission_denied",
+    "tool_validation_failed",
+    "deepgram_disconnected",
+    "openai_failed",
+    "unsupported_operation",
+]
+
+
+class AgentError(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    code: AgentErrorCode
+    message: str
+    retryable: bool = False
+    details: dict[str, Any] | None = None
+
+
 class RecentEvent(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -213,6 +238,14 @@ class RoomCaptureResponse(BaseModel):
     projection: dict[str, Any] | None
     semantic_draft: SemanticDraft | None = Field(default=None, alias="semanticDraft")
     visual_observation: VisualObservation | None = Field(default=None, alias="visualObservation")
+    voice_sessions: list["VoiceSession"] = Field(default_factory=list, alias="voiceSessions")
+    voice_events: list["VoiceTranscriptEvent"] = Field(default_factory=list, alias="voiceEvents")
+    agent_turns: list["AgentTurn"] = Field(default_factory=list, alias="agentTurns")
+    proposals: list["LevelEditProposal"] = Field(default_factory=list)
+    permission_requests: list["PermissionRequest"] = Field(default_factory=list, alias="permissionRequests")
+    semantic_objects: list[dict[str, Any]] = Field(default_factory=list, alias="semanticObjects")
+    stage_reference: dict[str, Any] | None = Field(default=None, alias="stageReference")
+    stage_reference_version: int = Field(default=0, alias="stageReferenceVersion")
     updated_at: datetime | None = Field(alias="updatedAt")
     recent_events: list[RecentEvent] = Field(alias="recentEvents")
 
@@ -224,6 +257,7 @@ class RoomSelectionRequest(BaseModel):
     world_id: str | None = Field(default=None, alias="worldId")
     world_name: str | None = Field(default=None, alias="worldName")
     stage_reference: dict[str, Any] | None = Field(default=None, alias="stageReference")
+    stage_reference_version: int | None = Field(default=None, alias="stageReferenceVersion")
 
 
 class RoomSelectionResponse(BaseModel):
@@ -233,6 +267,7 @@ class RoomSelectionResponse(BaseModel):
     world_id: str | None = Field(default=None, alias="worldId")
     world_name: str | None = Field(default=None, alias="worldName")
     stage_reference: dict[str, Any] | None = Field(default=None, alias="stageReference")
+    stage_reference_version: int = Field(default=0, alias="stageReferenceVersion")
     selected_at: datetime | None = Field(default=None, alias="selectedAt")
 
 
@@ -285,6 +320,11 @@ class HelloMessage(BaseModel):
     projection: dict[str, Any] | None = None
     semantic_draft: SemanticDraft | None = Field(default=None, alias="semanticDraft")
     visual_observation: VisualObservation | None = Field(default=None, alias="visualObservation")
+    voice_sessions: list["VoiceSession"] = Field(default_factory=list, alias="voiceSessions")
+    voice_events: list["VoiceTranscriptEvent"] = Field(default_factory=list, alias="voiceEvents")
+    agent_turns: list["AgentTurn"] = Field(default_factory=list, alias="agentTurns")
+    proposals: list["LevelEditProposal"] = Field(default_factory=list)
+    permission_requests: list["PermissionRequest"] = Field(default_factory=list, alias="permissionRequests")
 
 
 class ProjectionUpdatedMessage(BaseModel):
@@ -297,12 +337,16 @@ class ProjectionUpdatedMessage(BaseModel):
     projection: dict[str, Any]
     semantic_draft: SemanticDraft | None = Field(default=None, alias="semanticDraft")
     visual_observation: VisualObservation | None = Field(default=None, alias="visualObservation")
+    voice_sessions: list["VoiceSession"] = Field(default_factory=list, alias="voiceSessions")
+    proposals: list["LevelEditProposal"] = Field(default_factory=list)
+    permission_requests: list["PermissionRequest"] = Field(default_factory=list, alias="permissionRequests")
     source_client_id: str | None = Field(default=None, alias="sourceClientId")
 
 
 class ErrorMessage(BaseModel):
     type: Literal["error"] = "error"
     message: str
+    error: AgentError | None = None
 
 
 class SemanticDraftUpdatedMessage(BaseModel):
@@ -323,6 +367,150 @@ class VisualObservationUpdatedMessage(BaseModel):
     version: int
     visual_observation: VisualObservation = Field(alias="visualObservation")
     semantic_draft: SemanticDraft | None = Field(default=None, alias="semanticDraft")
+
+
+class VoiceSession(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    session_id: str = Field(alias="sessionId")
+    room_id: str = Field(alias="roomId")
+    world_id: str | None = Field(default=None, alias="worldId")
+    status: Literal[
+        "starting",
+        "waiting_for_permission",
+        "listening",
+        "thinking",
+        "running_tool",
+        "waiting_for_job",
+        "speaking",
+        "error",
+        "ended",
+    ] = "starting"
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
+    ended_at: datetime | None = Field(default=None, alias="endedAt")
+    capture_version: int = Field(default=0, alias="captureVersion")
+    semantic_draft_version: int = Field(default=0, alias="semanticDraftVersion")
+    stage_reference_version: int = Field(default=0, alias="stageReferenceVersion")
+    client_id: str | None = Field(default=None, alias="clientId")
+    permissions: list[str] = Field(default_factory=list)
+    error: AgentError | None = None
+
+
+class VoiceSessionCreateRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    client_id: str | None = Field(default=None, alias="clientId")
+    world_id: str | None = Field(default=None, alias="worldId")
+    end_other_active: bool = Field(default=False, alias="endOtherActive")
+
+
+class VoiceTranscriptEvent(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    event_id: str = Field(alias="eventId")
+    session_id: str = Field(alias="sessionId")
+    room_id: str = Field(alias="roomId")
+    type: Literal["partial", "final", "assistant_text", "assistant_audio", "error"]
+    transcript: str = ""
+    confidence: float | None = None
+    audio_base64: str | None = Field(default=None, alias="audioBase64")
+    mime_type: str | None = Field(default=None, alias="mimeType")
+    provider: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    error: AgentError | None = None
+    created_at: datetime = Field(alias="createdAt")
+
+
+class AgentToolCall(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    tool_call_id: str = Field(alias="toolCallId")
+    name: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    status: Literal["pending", "running", "succeeded", "failed", "rejected"] = "pending"
+    result: dict[str, Any] | None = None
+    error: AgentError | None = None
+
+
+class AgentTurn(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    turn_id: str = Field(alias="turnId")
+    session_id: str | None = Field(default=None, alias="sessionId")
+    room_id: str = Field(alias="roomId")
+    user_transcript: str = Field(alias="userTranscript")
+    normalized_intent: str | None = Field(default=None, alias="normalizedIntent")
+    assistant_response: str = Field(default="", alias="assistantResponse")
+    tool_calls: list[AgentToolCall] = Field(default_factory=list, alias="toolCalls")
+    validation_results: list[dict[str, Any]] = Field(default_factory=list, alias="validationResults")
+    status: Literal["thinking", "running_tool", "waiting_for_permission", "complete", "error"] = "thinking"
+    error: AgentError | None = None
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
+
+
+class LevelEditProposal(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    proposal_id: str = Field(alias="proposalId")
+    room_id: str = Field(alias="roomId")
+    world_id: str | None = Field(default=None, alias="worldId")
+    session_id: str | None = Field(default=None, alias="sessionId")
+    turn_id: str | None = Field(default=None, alias="turnId")
+    patch: dict[str, Any]
+    scene_plan: dict[str, Any] = Field(default_factory=dict, alias="scenePlan")
+    validation_report: dict[str, Any] = Field(default_factory=dict, alias="validationReport")
+    approval_state: Literal["draft", "pending_approval", "approved", "rejected", "applied"] = Field(
+        default="pending_approval",
+        alias="approvalState",
+    )
+    required_permissions: list[str] = Field(default_factory=list, alias="requiredPermissions")
+    required_version_refs: dict[str, int] = Field(default_factory=dict, alias="requiredVersionRefs")
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
+
+
+class PermissionRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    permission_request_id: str = Field(alias="permissionRequestId")
+    room_id: str = Field(alias="roomId")
+    session_id: str | None = Field(default=None, alias="sessionId")
+    action: Literal[
+        "apply_patch",
+        "replace_generated",
+        "remove_generated",
+        "delete_manual_content",
+        "end_other_voice_session",
+    ]
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    risk_summary: str = Field(alias="riskSummary")
+    required_version_refs: dict[str, int] = Field(default_factory=dict, alias="requiredVersionRefs")
+    status: Literal["pending", "approved", "denied", "expired"] = "pending"
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
+
+
+class PermissionResolutionRequest(BaseModel):
+    approved: bool
+
+
+class ProposalResolutionRequest(BaseModel):
+    approved: bool
+
+
+class VoiceRoomStateUpdatedMessage(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    type: Literal["voice_room_state_updated"] = "voice_room_state_updated"
+    room_id: str = Field(alias="roomId")
+    version: int
+    voice_sessions: list[VoiceSession] = Field(default_factory=list, alias="voiceSessions")
+    voice_events: list[VoiceTranscriptEvent] = Field(default_factory=list, alias="voiceEvents")
+    agent_turns: list[AgentTurn] = Field(default_factory=list, alias="agentTurns")
+    proposals: list[LevelEditProposal] = Field(default_factory=list)
+    permission_requests: list[PermissionRequest] = Field(default_factory=list, alias="permissionRequests")
 
 
 class AgentCapabilityStatus(BaseModel):

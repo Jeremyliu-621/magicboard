@@ -12,6 +12,7 @@
 // for phone controllers.
 'use strict';
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const { WebSocketServer } = require('ws');
@@ -19,6 +20,8 @@ const QRCode = require('qrcode');
 
 const ROOT = __dirname;
 const PORT = process.env.PORT || 8080;
+const TLS_CERT = process.env.MAGICBOARD_TLS_CERT;
+const TLS_KEY = process.env.MAGICBOARD_TLS_KEY;
 const MAX_PLAYERS = 6;
 
 // ---- fal.ai enhance proxy config ----------------------------------------
@@ -194,7 +197,7 @@ function safeStatic(reqPath) {
   return null;
 }
 
-const server = http.createServer(async (req, res) => {
+const requestHandler = async (req, res) => {
   const url = new URL(req.url, 'http://x');
   const p = url.pathname;
 
@@ -222,7 +225,11 @@ const server = http.createServer(async (req, res) => {
   const file = safeStatic(p);
   if (!file) { res.writeHead(404); return res.end('not found'); }
   sendFile(res, file);
-});
+};
+
+const server = TLS_CERT && TLS_KEY
+  ? https.createServer({ cert: fs.readFileSync(TLS_CERT), key: fs.readFileSync(TLS_KEY) }, requestHandler)
+  : http.createServer(requestHandler);
 
 function sendFile(res, file) {
   fs.readFile(file, (err, buf) => {
@@ -301,7 +308,8 @@ wss.on('connection', (ws) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Doodle Smash server on http://localhost:${PORT}`);
-  console.log(`  game:       http://localhost:${PORT}/`);
-  console.log(`  controller: http://localhost:${PORT}/c?lobby=CODE`);
+  const protocol = TLS_CERT && TLS_KEY ? 'https' : 'http';
+  console.log(`Doodle Smash server on ${protocol}://localhost:${PORT}`);
+  console.log(`  game:       ${protocol}://localhost:${PORT}/`);
+  console.log(`  controller: ${protocol}://localhost:${PORT}/c?lobby=CODE`);
 });

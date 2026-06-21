@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.orchestrator import AgentOrchestrator
 from app.rooms import rooms
 from app.schemas import VisualObservation, VisualObservationHint
 
@@ -14,6 +15,7 @@ from app.schemas import VisualObservation, VisualObservationHint
 def setup_function() -> None:
     os.environ.pop("OPENAI_API_KEY", None)
     os.environ.pop("MAGICBOARD_VLM_MODEL", None)
+    os.environ.pop("DEEPGRAM_API_KEY", None)
     rooms.reset()
 
 
@@ -53,7 +55,7 @@ def test_agent_status_reports_stubbed_cold_path_without_required_keys(monkeypatc
     assert capabilities["vlm_semantic"]["status"] == "missing_key"
     assert capabilities["vlm_semantic"]["requiredEnv"] == ["OPENAI_API_KEY"]
     assert capabilities["voice"]["status"] == "missing_key"
-    assert capabilities["voice"]["requiredEnv"] == ["DEEPGRAM_API_KEY"]
+    assert capabilities["voice"]["requiredEnv"] == ["OPENAI_API_KEY", "DEEPGRAM_API_KEY"]
 
 
 def test_empty_room_capture() -> None:
@@ -62,16 +64,20 @@ def test_empty_room_capture() -> None:
     response = client.get("/rooms/demo/capture")
 
     assert response.status_code == 200
-    assert response.json() == {
-        "roomId": "demo",
-        "version": 0,
-        "capture": None,
-        "projection": None,
-        "semanticDraft": None,
-        "visualObservation": None,
-        "updatedAt": None,
-        "recentEvents": [],
-    }
+    body = response.json()
+    assert body["roomId"] == "demo"
+    assert body["version"] == 0
+    assert body["capture"] is None
+    assert body["projection"] is None
+    assert body["semanticDraft"] is None
+    assert body["visualObservation"] is None
+    assert body["voiceSessions"] == []
+    assert body["voiceEvents"] == []
+    assert body["agentTurns"] == []
+    assert body["proposals"] == []
+    assert body["permissionRequests"] == []
+    assert body["updatedAt"] is None
+    assert body["recentEvents"] == []
 
 
 def test_current_selection_starts_empty() -> None:
@@ -84,6 +90,7 @@ def test_current_selection_starts_empty() -> None:
         "roomId": None,
         "worldId": None,
         "worldName": None,
+        "stageReferenceVersion": 0,
         "selectedAt": None,
     }
 
@@ -115,6 +122,7 @@ def test_selection_websocket_receives_desktop_selection_updates() -> None:
             "roomId": None,
             "worldId": None,
             "worldName": None,
+            "stageReferenceVersion": 0,
             "selectedAt": None,
         }
 
@@ -140,6 +148,7 @@ def test_selection_websocket_receives_desktop_selection_updates() -> None:
             "roomId": None,
             "worldId": None,
             "worldName": None,
+            "stageReferenceVersion": 0,
             "selectedAt": None,
         }
 
@@ -425,6 +434,81 @@ def test_semantic_draft_extracts_portal_endpoint_and_pair_candidates() -> None:
     assert len(pair["portalEndpoints"]) == 2
 
 
+def test_semantic_draft_extracts_freehand_portal_pair_and_vlm_confirms_pair() -> None:
+    client = TestClient(app)
+    projected = projection()
+    projected["strokes"] = [
+        {
+            "id": "loop-a",
+            "sourceId": "loop-a",
+            "points": [
+                {"x": 180, "y": 520},
+                {"x": 220, "y": 480},
+                {"x": 270, "y": 505},
+                {"x": 280, "y": 560},
+                {"x": 240, "y": 605},
+                {"x": 190, "y": 585},
+                {"x": 170, "y": 540},
+                {"x": 180, "y": 520},
+            ],
+            "width": 6,
+        },
+        {
+            "id": "loop-b",
+            "sourceId": "loop-b",
+            "points": [
+                {"x": 1480, "y": 520},
+                {"x": 1525, "y": 480},
+                {"x": 1580, "y": 510},
+                {"x": 1585, "y": 565},
+                {"x": 1540, "y": 610},
+                {"x": 1490, "y": 585},
+                {"x": 1470, "y": 540},
+                {"x": 1480, "y": 520},
+            ],
+            "width": 6,
+        },
+    ]
+    projected["shapes"] = []
+
+    response = client.post(
+        "/rooms/freehand-portals/capture",
+        json={"type": "canvas_capture", "capture": {"ok": True}, "projection": projected},
+    )
+    assert response.status_code == 200
+    draft = response.json()["semanticDraft"]
+    assert [candidate["extractor"] for candidate in draft["candidates"]] == ["circle", "circle", "portal_pair"]
+
+    update = rooms.store_visual_observation(
+        "freehand-portals",
+        VisualObservation(
+            status="ready",
+            roomId="freehand-portals",
+            worldId=None,
+            captureVersion=1,
+            jobId=response.json()["visualObservation"]["jobId"],
+            model="gpt-test",
+            description="The two loops are linked portals.",
+            hints=[
+                VisualObservationHint(
+                    kind="portal_endpoint",
+                    confidence=0.6,
+                    description="two linked portal loops",
+                    behavior="pass",
+                    sourceIds=["loop-a", "loop-b"],
+                )
+            ],
+            updatedAt=datetime.now(UTC),
+        ),
+    )
+
+    assert update is not None
+    confirmed_pair = update.model_dump(mode="json", by_alias=True)["semanticDraft"]["candidates"][2]
+    assert confirmed_pair["status"] == "confirmed"
+    assert confirmed_pair["answer"]["role"] == "portal_pair"
+    assert len(confirmed_pair["portalEndpoints"]) == 2
+
+
 def test_semantic_answer_binds_to_current_candidate_and_confirms_behavior() -> None:
     client = TestClient(app)
     projected = projection()
@@ -675,7 +759,7 @@ def test_agent_job_rejects_stale_capture_version_before_cold_path_work() -> None
     assert body["requiredEnv"] == []
 
 
-def test_voice_agent_job_is_explicitly_deferred() -> None:
+def test_voice_agent_job_reports_configured_endpoint_path() -> None:
     client = TestClient(app)
 
     response = client.post(
@@ -690,6 +774,68 @@ def test_voice_agent_job_is_explicitly_deferred() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "unsupported"
-    assert body["requiredEnv"] == ["DEEPGRAM_API_KEY"]
-    assert "deferred" in body["message"].lower()
+    assert body["status"] == "stubbed_missing_key"
+    assert body["requiredEnv"] == ["OPENAI_API_KEY", "DEEPGRAM_API_KEY"]
+    assert "voice requires" in body["message"].lower()
+
+
+def test_voice_session_start_missing_keys_returns_typed_error(monkeypatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
+    client = TestClient(app)
+
+    response = client.post("/rooms/voice-missing/voice/sessions", json={"clientId": "ipad"})
+
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert detail["code"] == "missing_key"
+    assert set(detail["details"]["missing"]) == {"OPENAI_API_KEY", "DEEPGRAM_API_KEY"}
+
+
+def test_voice_session_lifecycle_and_events(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai")
+    monkeypatch.setenv("DEEPGRAM_API_KEY", "test-deepgram")
+    client = TestClient(app)
+
+    response = client.post("/rooms/voice-room/voice/sessions", json={"clientId": "desktop", "worldId": "world-1"})
+
+    assert response.status_code == 200
+    session = response.json()
+    assert session["status"] == "starting"
+    assert session["roomId"] == "voice-room"
+    assert session["worldId"] == "world-1"
+    assert client.get(f"/rooms/voice-room/voice/sessions/{session['sessionId']}").json()["sessionId"] == session["sessionId"]
+    assert client.get("/rooms/voice-room/voice/events").json() == {"roomId": "voice-room", "events": []}
+
+    ended = client.delete(f"/rooms/voice-room/voice/sessions/{session['sessionId']}")
+    assert ended.status_code == 200
+    assert ended.json()["status"] == "ended"
+
+
+def test_starting_second_voice_session_requires_permission(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai")
+    monkeypatch.setenv("DEEPGRAM_API_KEY", "test-deepgram")
+    client = TestClient(app)
+    assert client.post("/rooms/one-voice/voice/sessions", json={"clientId": "a"}).status_code == 200
+
+    response = client.post("/rooms/one-voice/voice/sessions", json={"clientId": "b"})
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "permission_required"
+
+
+def test_agent_tool_rejects_stale_version_refs() -> None:
+    rooms.select_room("agent-tools", world_id="world-tools", stage_reference={"platforms": []})
+    orchestrator = AgentOrchestrator(rooms)
+
+    stale_capture = orchestrator._run_tool("agent-tools", None, "turn-1", "validate_level_patch", {
+        "patch": {"type": "magicboard_world_patch", "version": 1, "target": {"mapId": "world-tools"}, "operations": []},
+        "requiredVersionRefs": {"captureVersion": 99},
+    })
+    stale_stage = orchestrator._run_tool("agent-tools", None, "turn-1", "validate_level_patch", {
+        "patch": {"type": "magicboard_world_patch", "version": 1, "target": {"mapId": "world-tools"}, "operations": []},
+        "requiredVersionRefs": {"stageReferenceVersion": 99},
+    })
+
+    assert stale_capture["error"]["code"] == "stale_capture"
+    assert stale_stage["error"]["code"] == "stale_stage_reference"

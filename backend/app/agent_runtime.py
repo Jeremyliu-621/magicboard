@@ -4,7 +4,6 @@ import asyncio
 import base64
 import hashlib
 import json
-import os
 import ssl
 import time
 from io import BytesIO
@@ -16,6 +15,7 @@ from urllib.request import Request, urlopen
 import certifi
 from PIL import Image, ImageDraw
 
+from .config import env, load_backend_env
 from .schemas import (
     AgentCapabilityStatus,
     AgentJobRequest,
@@ -33,8 +33,9 @@ OPENAI_SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 
 
 def agent_status() -> AgentStatusResponse:
-    openai_key_present = bool(os.getenv("OPENAI_API_KEY"))
-    deepgram_key_present = bool(os.getenv("DEEPGRAM_API_KEY"))
+    load_backend_env()
+    openai_key_present = bool(env("OPENAI_API_KEY"))
+    deepgram_key_present = bool(env("DEEPGRAM_API_KEY"))
     return AgentStatusResponse(
         capabilities=[
             AgentCapabilityStatus(
@@ -50,16 +51,16 @@ def agent_status() -> AgentStatusResponse:
                 status="enabled" if openai_key_present else "missing_key",
                 hotPath=False,
                 requiredEnv=["OPENAI_API_KEY"],
-                configuredModel=os.getenv("MAGICBOARD_VLM_MODEL") or DEFAULT_VLM_MODEL,
+                configuredModel=env("MAGICBOARD_VLM_MODEL") or DEFAULT_VLM_MODEL,
                 message="Phase 1 VLM classification observes drawing candidates and chooses gameplay classes.",
             ),
             AgentCapabilityStatus(
                 id="voice",
-                status="deferred" if deepgram_key_present else "missing_key",
-                hotPath=False,
-                requiredEnv=["DEEPGRAM_API_KEY"],
-                configuredModel=None,
-                message="Voice is deferred until the visual and chat clarification loop is solid.",
+                status="enabled" if (openai_key_present and deepgram_key_present) else "missing_key",
+                hotPath=True,
+                requiredEnv=["OPENAI_API_KEY", "DEEPGRAM_API_KEY"],
+                configuredModel=env("MAGICBOARD_VLM_MODEL") or DEFAULT_VLM_MODEL,
+                message="Voice sessions stream microphone audio through Deepgram and run the OpenAI level-editing orchestrator.",
             ),
         ]
     )
@@ -78,7 +79,7 @@ def _job_id(room_id: str, request: AgentJobRequest) -> str:
 
 
 def visual_job_id(room_id: str, capture_version: int) -> str:
-    raw = "|".join([room_id, str(capture_version), os.getenv("MAGICBOARD_VLM_MODEL") or DEFAULT_VLM_MODEL])
+    raw = "|".join([room_id, str(capture_version), env("MAGICBOARD_VLM_MODEL") or DEFAULT_VLM_MODEL])
     return "visual-job-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
 
 
@@ -88,8 +89,8 @@ def initial_visual_observation(
     world_id: str | None,
     capture_version: int,
 ) -> VisualObservation:
-    model = os.getenv("MAGICBOARD_VLM_MODEL") or DEFAULT_VLM_MODEL
-    if not os.getenv("OPENAI_API_KEY"):
+    model = env("MAGICBOARD_VLM_MODEL") or DEFAULT_VLM_MODEL
+    if not env("OPENAI_API_KEY"):
         return VisualObservation(
             status="missing_key",
             roomId=room_id,
@@ -256,7 +257,8 @@ def _visual_prompt(projection: dict[str, Any] | None) -> str:
         "you only choose the class for each highlighted/recent sourceId. Valid gameplay classes are "
         "platform, cannon, spikes, portal_endpoint, portal_pair, unknown, or ignore. Return only compact "
         "JSON with keys description and hints. Each hint has kind, confidence, description, behavior, "
-        "and sourceIds. Use existing sourceId values exactly. Do not invent coordinates or gameplay rules."
+        "and sourceIds. Keep descriptions under 80 characters. Use existing sourceId values exactly. "
+        "Do not invent coordinates or gameplay rules."
         "\nProjection JSON:\n"
         + json.dumps(_safe_projection_context(projection), sort_keys=True)
     )
@@ -328,6 +330,31 @@ def _chat_completion_output_text(response: dict[str, Any]) -> str:
     return content if isinstance(content, str) else ""
 
 
+def _parse_openai_json(text: str) -> dict[str, Any]:
+    clean = text.strip()
+    if clean.startswith("```"):
+        clean = clean.removeprefix("```json").removeprefix("```").strip()
+        if clean.endswith("```"):
+            clean = clean[:-3].strip()
+    try:
+        parsed = json.loads(clean)
+    except json.JSONDecodeError as error:
+        start = clean.find("{")
+        end = clean.rfind("}")
+        if 0 <= start < end:
+            try:
+                parsed = json.loads(clean[start : end + 1])
+            except json.JSONDecodeError:
+                preview = clean[:700].replace("\n", "\\n")
+                raise RuntimeError(f"OpenAI returned malformed JSON at char {error.pos}: {preview}") from error
+        else:
+            preview = clean[:700].replace("\n", "\\n")
+            raise RuntimeError(f"OpenAI returned non-JSON visual response: {preview}") from error
+    if not isinstance(parsed, dict):
+        raise RuntimeError("OpenAI visual response JSON must be an object")
+    return parsed
+
+
 def _clean_hint(raw: dict[str, Any]) -> VisualObservationHint | None:
     kind = str(raw.get("kind") or "unknown").lower()
     if kind not in {"platform", "cannon", "spikes", "portal_endpoint", "portal_pair", "hazard", "decor", "ignore", "unknown"}:
@@ -394,7 +421,7 @@ def _request_responses_visual_observation(
                 ],
             }
         ],
-        "max_output_tokens": 300,
+        "max_output_tokens": 1000,
         "text": {
             "format": {
                 "type": "json_schema",
@@ -408,7 +435,7 @@ def _request_responses_visual_observation(
     text = _output_text(payload)
     if not text:
         raise RuntimeError("OpenAI response did not include output text")
-    return json.loads(text)
+    return _parse_openai_json(text)
 
 
 def _request_chat_visual_observation(
@@ -430,21 +457,24 @@ def _request_chat_visual_observation(
                 ],
             }
         ],
-        "max_tokens": 300,
+        "max_tokens": 1000,
         "response_format": {"type": "json_object"},
     }
     payload = _post_openai_json(OPENAI_CHAT_COMPLETIONS_URL, body, api_key, timeout=30)
+    choices = payload.get("choices") or []
+    if choices and isinstance(choices[0], dict) and choices[0].get("finish_reason") == "length":
+        raise RuntimeError("OpenAI visual response was truncated before valid JSON was complete")
     text = _chat_completion_output_text(payload)
     if not text:
         raise RuntimeError("OpenAI chat response did not include message content")
-    return json.loads(text)
+    return _parse_openai_json(text)
 
 
 def _request_openai_visual_observation(*, projection: dict[str, Any] | None) -> dict[str, Any]:
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = env("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("missing OPENAI_API_KEY")
-    model = os.getenv("MAGICBOARD_VLM_MODEL") or DEFAULT_VLM_MODEL
+    model = env("MAGICBOARD_VLM_MODEL") or DEFAULT_VLM_MODEL
     image_url = _projection_png_data_url(projection)
     prompt = _visual_prompt(projection)
     # Responses is the target API, but this local environment currently hangs on
@@ -474,7 +504,7 @@ async def run_visual_observation(
     projection: dict[str, Any] | None,
 ) -> VisualObservation:
     started = time.perf_counter()
-    model = os.getenv("MAGICBOARD_VLM_MODEL") or DEFAULT_VLM_MODEL
+    model = env("MAGICBOARD_VLM_MODEL") or DEFAULT_VLM_MODEL
     try:
         result = await asyncio.to_thread(_request_openai_visual_observation, projection=projection)
         hints = [
@@ -521,16 +551,20 @@ def make_stub_job(
         message = "Capture version changed before the cold-path agent job could run."
     elif request.modality in {"vlm", "llm"}:
         required_env = ["OPENAI_API_KEY"]
-        if os.getenv("OPENAI_API_KEY"):
+        if env("OPENAI_API_KEY"):
             status = "stubbed_ready"
             message = "OPENAI_API_KEY is present; VLM classification runs from capture updates."
         else:
             status = "stubbed_missing_key"
             message = "Phase 1 VLM classification is not configured. Candidate geometry can be detected but doodles will not auto-apply."
     elif request.modality == "voice":
-        required_env = ["DEEPGRAM_API_KEY"]
-        status = "unsupported"
-        message = "Voice jobs are deferred; answer through the visual panel or text command path."
+        required_env = ["OPENAI_API_KEY", "DEEPGRAM_API_KEY"]
+        if env("OPENAI_API_KEY") and env("DEEPGRAM_API_KEY"):
+            status = "stubbed_ready"
+            message = "Voice session endpoints are configured; use /rooms/{roomId}/voice/sessions."
+        else:
+            status = "stubbed_missing_key"
+            message = "Voice requires OPENAI_API_KEY and DEEPGRAM_API_KEY in backend/.env."
     else:
         status = "unsupported"
         message = "Unsupported agent modality."

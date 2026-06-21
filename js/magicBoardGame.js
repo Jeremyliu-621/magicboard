@@ -5,7 +5,17 @@
 
   const DS = global.DS = global.DS || {};
   const ALLOWED_KINDS = new Set(['ground', 'wood', 'stone', 'crystal', 'box', 'float', 'trampoline', 'spikes', 'cannon', 'drawn']);
-  const ALLOWED_OPS = new Set(['replace_platforms', 'add_platform', 'add_portal_pair', 'remove_generated', 'set_spawns']);
+  const ALLOWED_OPS = new Set([
+    'replace_platforms',
+    'add_platform',
+    'update_platform',
+    'add_portal_pair',
+    'remove_generated',
+    'set_spawns',
+    'set_character_skin',
+    'set_roster',
+    'set_world_metadata',
+  ]);
 
   function finite(value) {
     return typeof value === 'number' && Number.isFinite(value);
@@ -144,6 +154,39 @@
     return errors;
   }
 
+  function validateSpawns(spawns, index) {
+    const errors = [];
+    if (!Array.isArray(spawns) || spawns.length < 2) return ['operation ' + index + ' requires at least two spawns'];
+    spawns.forEach((spawn, spawnIndex) => {
+      if (!spawn || typeof spawn !== 'object') {
+        errors.push('operation ' + index + ' spawn ' + spawnIndex + ' is required');
+        return;
+      }
+      if (!finite(spawn.x) || !finite(spawn.y)) errors.push('operation ' + index + ' spawn ' + spawnIndex + ' must have finite x/y');
+    });
+    return errors;
+  }
+
+  function validateRoster(roster, index) {
+    const errors = [];
+    if (!Array.isArray(roster) || roster.length < 2) return ['operation ' + index + ' roster requires at least two entries'];
+    roster.forEach((name, rosterIndex) => {
+      if (typeof name !== 'string' || !name.trim()) errors.push('operation ' + index + ' roster ' + rosterIndex + ' must be a character name');
+      if (DS.Store && DS.Store.data && DS.Store.data.characters && !DS.Store.data.characters[name]) {
+        errors.push('operation ' + index + ' unknown character ' + name);
+      }
+    });
+    return errors;
+  }
+
+  function validateGeneratedSelector(operation, index) {
+    const ids = operation.candidateIds || (operation.candidateId ? [operation.candidateId] : []);
+    if (!Array.isArray(ids) || !ids.length || ids.some((id) => typeof id !== 'string' || !id)) {
+      return ['operation ' + index + ' requires candidateId or candidateIds'];
+    }
+    return [];
+  }
+
   function validatePlatform(platform, index) {
     const errors = [];
     if (!platform || typeof platform !== 'object') return ['operation ' + index + ' platform is required'];
@@ -176,10 +219,19 @@
       }
       if (operation.type === 'replace_platforms') return;
       if (operation.type === 'add_platform') errors.push.apply(errors, validatePlatform(operation.platform, index));
+      if (operation.type === 'update_platform') {
+        errors.push.apply(errors, validateGeneratedSelector(operation, index));
+        if (operation.patch) errors.push.apply(errors, validatePlatform(Object.assign({ x: 1, y: 1, w: 1, h: 1 }, operation.patch), index));
+      }
       if (operation.type === 'add_portal_pair') errors.push.apply(errors, validatePortalPair(operation.portalPair, index));
-      if (operation.type === 'set_spawns') {
-        const spawns = operation.spawns || [];
-        if (!Array.isArray(spawns) || spawns.length < 2) errors.push('operation ' + index + ' requires at least two spawns');
+      if (operation.type === 'remove_generated') errors.push.apply(errors, validateGeneratedSelector(operation, index));
+      if (operation.type === 'set_spawns') errors.push.apply(errors, validateSpawns(operation.spawns || [], index));
+      if (operation.type === 'set_roster') errors.push.apply(errors, validateRoster(operation.roster || [], index));
+      if (operation.type === 'set_character_skin' && (!operation.character || !operation.skin)) {
+        errors.push('operation ' + index + ' requires character and skin');
+      }
+      if (operation.type === 'set_world_metadata' && operation.name != null && typeof operation.name !== 'string') {
+        errors.push('operation ' + index + ' name must be a string');
       }
     });
     return { ok: errors.length === 0, errors };
@@ -193,6 +245,37 @@
   function sameGeneratedPortal(portal, incomingIds) {
     const source = portal && portal.source;
     return source && source.kind === 'magicboard_agent' && incomingIds.has(source.candidateId);
+  }
+
+  function selectorIds(operation) {
+    if (!operation) return [];
+    if (Array.isArray(operation.candidateIds)) return operation.candidateIds;
+    return operation.candidateId ? [operation.candidateId] : [];
+  }
+
+  function updateGeneratedPlatforms(stage, operation) {
+    const ids = new Set(selectorIds(operation));
+    const patch = operation.patch || operation.platform || {};
+    stage.platforms = (stage.platforms || []).map((platform) => {
+      if (!sameGeneratedSource(platform, ids)) return platform;
+      return Object.assign({}, platform, clone(patch), { source: platform.source });
+    });
+  }
+
+  function validateLaunchReady(mapId, roster) {
+    const missing = [];
+    if (!DS.Store || !DS.Store.data || !DS.Maps) return { ok: false, missing: ['game store'], stage: null };
+    let stage = null;
+    try { stage = DS.Maps.stageFor(DS.Store.data, mapId); }
+    catch (_error) { stage = null; }
+    if (!stage) missing.push('stage');
+    const platforms = stage && Array.isArray(stage.platforms) ? stage.platforms : [];
+    const spawns = stage && Array.isArray(stage.spawns) ? stage.spawns : [];
+    const activeRoster = Array.isArray(roster) && roster.length ? roster : (DS.Store.data.roster || []);
+    if (!platforms.length) missing.push('platform');
+    if (spawns.filter((spawn) => spawn && finite(spawn.x) && finite(spawn.y)).length < 2) missing.push('two spawns');
+    if (activeRoster.filter((name) => DS.Store.data.characters && DS.Store.data.characters[name]).length < 2) missing.push('valid roster');
+    return { ok: missing.length === 0, missing, stage };
   }
 
   function applyPatch(patch, options) {
@@ -212,6 +295,8 @@
         incomingCandidateIds.add(operation.portalPair.a.source.candidateId);
       } else if (operation.type === 'remove_generated' && operation.candidateId) {
         incomingCandidateIds.add(operation.candidateId);
+      } else if (operation.type === 'remove_generated' && Array.isArray(operation.candidateIds)) {
+        operation.candidateIds.forEach((id) => incomingCandidateIds.add(id));
       }
     });
     if (incomingCandidateIds.size) {
@@ -231,8 +316,18 @@
         stage.portals = stage.portals || [];
         const pair = operation.portalPair;
         stage.portals.push(clone(pair.a), clone(pair.b));
+      } else if (operation.type === 'update_platform') {
+        updateGeneratedPlatforms(stage, operation);
       } else if (operation.type === 'set_spawns') {
         stage.spawns = clone(operation.spawns);
+      } else if (operation.type === 'set_roster') {
+        DS.Store.data.roster = clone(operation.roster);
+      } else if (operation.type === 'set_character_skin') {
+        DS.Store.data.characters = DS.Store.data.characters || {};
+        DS.Store.data.characters[operation.character] = DS.Store.data.characters[operation.character] || { name: operation.character };
+        DS.Store.data.characters[operation.character].skin = clone(operation.skin);
+      } else if (operation.type === 'set_world_metadata') {
+        if (operation.name) stage.name = operation.name;
       }
     });
 
@@ -244,6 +339,7 @@
       mapId: patch.target.mapId,
       platformCount: (stage.platforms || []).length,
       portalCount: (stage.portals || []).length,
+      launch: validateLaunchReady(patch.target.mapId),
     };
   }
 
@@ -253,6 +349,7 @@
     classForCandidate,
     platformFromCandidate,
     portalPairFromCandidate,
+    validateLaunchReady,
     validatePatch,
   };
   global.MagicBoardGame = DS.MagicBoardGame;
