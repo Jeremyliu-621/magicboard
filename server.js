@@ -36,7 +36,14 @@ const FAL_RMBG_MODEL = 'fal-ai/birefnet/v2';
 // digital_illustration/hand_drawn fits the doodle world; vector_illustration/bold_stroke is flatter.
 // Both are env-tunable so we can dial the look without code edits.
 const FAL_STYLE = process.env.FAL_STYLE || 'digital_illustration/hand_drawn';
-const FAL_STRENGTH = Number(process.env.FAL_STRENGTH || 0.55);
+const FAL_STRENGTH = Number(process.env.FAL_STRENGTH || 0.68); // higher = upscales into a proper asset, not a doodle
+// ---- VLM (open-vocab doodle recognition) ----
+const VLM_MODEL = process.env.MAGICBOARD_VLM_MODEL || 'gpt-4.1-mini';
+// the words the game can turn into mechanics — steer the VLM toward a USABLE label (js/mechanics.js).
+const VLM_VOCAB = 'sword, knife, axe, hammer, bat, gun, bow, slingshot, bomb, ball, dart, rock, ' +
+  'fire, water, ice, lightning, plant, poison, wind, metal, light, dark, ' +
+  'star, crown, gem, key, heart, shield, apple, banana, food, bread, cake, pizza, ' +
+  'cloud, mushroom, tree, anvil, skull, boomerang, umbrella';
 const FAL_TIMEOUT_MS = 60000;
 // legacy fallback: fast-sdxl-controlnet-canny (FAL_PIPELINE=sdxl)
 const FAL_SDXL_MODEL = 'fal-ai/fast-sdxl-controlnet-canny';
@@ -58,12 +65,29 @@ function falKey() {
   return null;
 }
 
+// OPENAI_API_KEY for the VLM recognizer: env, then root .env, then backend/.env (where the
+// level-editor keeps it). Never hardcoded.
+function openaiKey() {
+  if (process.env.OPENAI_API_KEY) return process.env.OPENAI_API_KEY.trim();
+  for (const rel of ['.env', path.join('backend', '.env')]) {
+    try {
+      const txt = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+      for (const line of txt.split(/\r?\n/)) {
+        const m = line.match(/^\s*OPENAI_API_KEY\s*=\s*(.+?)\s*$/);
+        if (m) return m[1].replace(/^['"]|['"]$/g, '').trim();
+      }
+    } catch (e) { /* skip */ }
+  }
+  return null;
+}
+
 // Recraft target prompt — the STYLE param carries the look, so the prompt just names the subject
 // and asks for a clean, single, game-ready sprite.
 function recraftPrompt(label) {
-  return `a ${label}, single clean 2D game sprite, bold confident outline, flat bright colors, ` +
-    `centered, full object in frame, plain white background, no text, no sparkles, ` +
-    `no decorations, no extra marks, nothing in the background`;
+  return `a ${label} as a polished fully-colored 2D game item sprite — vibrant saturated colors, ` +
+    `clean bold outline, soft shading, single centered object on a plain white background. ` +
+    `NOT a black-and-white silhouette, NOT a plain line drawing — richly colored like a real game asset. ` +
+    `No text, no sparkles, no decorations, no background scenery.`;
 }
 // Legacy SDXL prompt (FAL_PIPELINE=sdxl).
 function falPrompt(label) {
@@ -177,6 +201,57 @@ async function falEnhance(req, res) {
   }
 }
 
+// POST /vlm-recognize { image_b64 } -> { top:{label,confidence}, results:[...], confident }.
+// Open-vocab doodle recognition via the OpenAI vision model — reads ANYTHING (a bare flame -> "fire"),
+// unlike the fixed 25-class CNN. Mirrors the CNN /recognize response shape (js/ai.js recognize()).
+async function vlmRecognize(req, res) {
+  const key = openaiKey();
+  if (!key) return sendJson(res, 500, { error: 'OPENAI_API_KEY not configured (env, .env, or backend/.env)' });
+
+  let body;
+  try { body = await readJsonBody(req); }
+  catch (e) { return sendJson(res, 400, { error: e.message || 'bad body' }); }
+  const image_b64 = body && body.image_b64;
+  if (typeof image_b64 !== 'string' || !image_b64) return sendJson(res, 400, { error: 'image_b64 is required' });
+  const dataUri = image_b64.startsWith('data:') ? image_b64 : `data:image/png;base64,${image_b64}`;
+
+  const prompt = `This is a child's rough doodle for a 2D fighting game. In ONE or TWO words, what did ` +
+    `they draw? Strongly prefer one of these game words when it fits: ${VLM_VOCAB}. If it is clearly an ` +
+    `element, use the element word (fire, water, ice, lightning, plant, poison, wind, metal, light, dark). ` +
+    `Reply with ONLY the word(s), lowercase, no punctuation, no explanation.`;
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 25000);
+  try {
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: VLM_MODEL, max_tokens: 12, temperature: 0,
+        messages: [{ role: 'user', content: [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: dataUri } },
+        ] }],
+      }),
+      signal: ctrl.signal,
+    });
+    if (!r.ok) {
+      const detail = await r.text().catch(() => '');
+      return sendJson(res, 502, { error: `vlm request failed (${r.status})`, detail: detail.slice(0, 300) });
+    }
+    const out = await r.json();
+    let label = ((out && out.choices && out.choices[0] && out.choices[0].message && out.choices[0].message.content) || '')
+      .trim().toLowerCase().replace(/[^a-z \-]/g, '').trim() || 'thing';
+    const top = { label: label, archetype: null, element: null, confidence: 0.95 };
+    return sendJson(res, 200, { results: [top], top: top, confident: true });
+  } catch (e) {
+    if (e && e.name === 'AbortError') return sendJson(res, 504, { error: 'vlm request timed out' });
+    return sendJson(res, 502, { error: `vlm recognize failed: ${(e && e.message) || e}` });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ---- static file serving -------------------------------------------------
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
@@ -218,6 +293,11 @@ const requestHandler = async (req, res) => {
   if (p === '/fal-enhance') {
     if (req.method !== 'POST') { res.writeHead(405); return res.end('method not allowed'); }
     return falEnhance(req, res);
+  }
+  // VLM open-vocab recognition: a drawing PNG -> a game label (replaces the 25-class CNN)
+  if (p === '/vlm-recognize') {
+    if (req.method !== 'POST') { res.writeHead(405); return res.end('method not allowed'); }
+    return vlmRecognize(req, res);
   }
   // health check for hosting platforms
   if (p === '/healthz') { res.writeHead(200); return res.end('ok'); }

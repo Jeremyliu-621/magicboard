@@ -20,6 +20,7 @@
     falEndpoint: null, // fal /fal-enhance URL; null = no fast pass (CAELLUM-only as before)
     chloeEndpoint: null, // CHLOE /mechanic URL; null = default (instant) mechanic only
     recognizerEndpoint: null, // RECOGNIZER /recognize URL; null = caller supplies the label (no auto-naming)
+    vlmEndpoint: null, // VLM /vlm-recognize URL; OPEN-VOCAB (reads anything). Preferred over the CNN.
     SIZE: 512,        // rasterized sketch size sent to /enhance (matches the compiled shape)
 
     // set the CAELLUM endpoint and ping its health
@@ -55,6 +56,14 @@
       return url;
     },
 
+    // set the VLM /vlm-recognize endpoint (open-vocab recognition; reads ANY drawing). Preferred over
+    // the 25-class CNN — recognize() uses this when set. Lives on the game server, so no health ping.
+    connectVLM: function (url) {
+      this.vlmEndpoint = url;
+      console.log('[DS.AI] VLM recognizer connected:', url);
+      return url;
+    },
+
     // set the RECOGNIZER /recognize endpoint and ping its health (mirrors connect/connectChloe)
     connectRecognizer: function (url) {
       this.recognizerEndpoint = url;
@@ -79,7 +88,7 @@
       // AUTO-LABEL: no label given + recognizer connected -> play instantly on a placeholder, let the
       // recognizer NAME the drawing, then run CAELLUM + CHLOE with the real name. The whole "draw
       // anything" loop with zero menu. Otherwise use the caller's label as before.
-      if (!label && this.recognizerEndpoint) {
+      if (!label && (this.vlmEndpoint || this.recognizerEndpoint)) {
         const self = this;
         this.recognize(strokes).then(function (r) { self._applyRecognition(prop, r, strokes, opts); });
       } else {
@@ -90,7 +99,7 @@
           if (this.falEndpoint) this._falEnhanceInto(prop, b64, prop.label);   // fast first pass
           if (this.endpoint) this._enhanceInto(prop, b64, prop.label);          // polished pass (wins)
         }
-        if (this.chloeEndpoint) this._mechanicInto(prop, prop.label, opts.description);
+        if (this.chloeEndpoint && !isElement(prop.label)) this._mechanicInto(prop, prop.label, opts.description);
       }
       return prop;
     },
@@ -114,7 +123,7 @@
       const b64 = stripDataUrl(dataUrl);
       if (this.falEndpoint) this._falEnhanceInto(prop, b64, prop.label);   // fast first pass
       if (this.endpoint) this._enhanceInto(prop, b64, prop.label);          // polished pass (wins)
-      if (this.chloeEndpoint) this._mechanicInto(prop, prop.label, opts.description);
+      if (this.chloeEndpoint && !isElement(prop.label)) this._mechanicInto(prop, prop.label, opts.description);
       return prop;
     },
 
@@ -275,6 +284,15 @@
     // strokes -> what the AI thinks it is. Resolves to the recognizer response ({results,confident,top})
     // or null. The draw flow uses top.label instead of asking the kid to pick a category.
     recognize: function (strokes) {
+      // prefer the VLM (open-vocab — reads a bare flame as "fire") over the fixed 25-class CNN.
+      if (this.vlmEndpoint) {
+        const image_b64 = stripDataUrl(this._rasterizeUrl(strokes));
+        return fetch(this.vlmEndpoint, {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ image_b64: image_b64 }),
+        }).then(function (r) { return r.json(); })
+          .then(function (out) { return (out && out.results) ? out : null; })
+          .catch(function (e) { if (global.__showErr) global.__showErr('vlm recognize failed: ' + (e && e.message || e)); return null; });
+      }
       if (!this.recognizerEndpoint) return Promise.resolve(null);
       const pixels = this._rasterize28(strokes);
       return fetch(this.recognizerEndpoint, {
@@ -319,7 +337,7 @@
         if (this.falEndpoint) this._falEnhanceInto(prop, b64, label);   // fast first pass
         if (this.endpoint) this._enhanceInto(prop, b64, label);          // polished pass (wins)
       }
-      if (this.chloeEndpoint) this._mechanicInto(prop, label, desc);
+      if (this.chloeEndpoint && !isElement(label)) this._mechanicInto(prop, label, desc);
     },
 
     // --- dev/testing: spawn a prop with a generated placeholder shape, no iPad needed ---
@@ -363,6 +381,9 @@
 
   // --- helpers ---
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  // a pure element label (fire/water/ice/...) keeps its deterministic clashing projectile weapon —
+  // we DON'T let CHLOE re-compose it into a beam/grenade, so fire-vs-water reliably fizzles.
+  function isElement(label) { return !!(DS.Mechanics && DS.Mechanics.elementOf && DS.Mechanics.elementOf(label)); }
 
   // CHLOE spec {node, params, name, flavor} -> a DS.Prop.fire() mechanic cfg (same shape as
   // DS.Mechanics.DEFAULTS). The spec is already CLAMPED server-side by config.clamp_spec(); this
