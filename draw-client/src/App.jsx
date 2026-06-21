@@ -1097,69 +1097,73 @@ export default function App() {
       onKeyDownCapture={() => { userInteractedRef.current = true }}
     >
       <Tldraw key={roomId} onMount={handleMount} components={tldrawComponents} />
-      <SemanticPanel
-        semanticDraft={semanticDraft}
-        selectedCandidateId={selectedCandidateId}
-        onSelectCandidate={setSelectedCandidateId}
-        onAnswer={sendClarificationAnswer}
-        error={semanticError}
-      />
-      <VisualObservationPanel observation={visualObservation} />
-      <VoicePanel
-        voiceStatus={voiceStatus}
-        voiceEvents={voiceEvents}
-        agentTurns={agentTurns}
-        proposals={proposals}
-        permissionRequests={permissionRequests}
-        isRecording={isRecording}
-        onToggleMic={toggleVoice}
-      />
-      <section className="debug-panel" aria-label="Sync status">
-        <div className={`status-dot status-${status}`} />
-        <dl>
-          <div>
-            <dt>Status</dt>
-            <dd>{status}</dd>
-          </div>
-          <div>
-            <dt>Room</dt>
-            <dd>{roomId}</dd>
-          </div>
-          <div>
-            <dt>World</dt>
-            <dd>{selectedRoom?.worldName || selectedRoom?.worldId || 'selected'}</dd>
-          </div>
-          <div>
-            <dt>Reference</dt>
-            <dd>{`${selectedRoom?.stageReference?.platforms?.length || 0} platforms · ${selectedRoom?.stageReference?.portals?.length || 0} portals`}</dd>
-          </div>
-          <div>
-            <dt>Backend</dt>
-            <dd>{backendVersion}</dd>
-          </div>
-          <div>
-            <dt>Version</dt>
-            <dd>{roomVersion}</dd>
-          </div>
-          <div>
-            <dt>Objects</dt>
-            <dd>{projectionCount}</dd>
-          </div>
-          <div>
-            <dt>Draft</dt>
-            <dd>{semanticCandidateCount(semanticDraft)}</dd>
-          </div>
-          <div>
-            <dt>Vision</dt>
-            <dd>{visualObservationLabel(visualObservation)}</dd>
-          </div>
-          <div>
-            <dt>Synced</dt>
-            <dd>{formatTime(lastSyncedAt)}</dd>
-          </div>
-        </dl>
-        {error ? <p>{error}</p> : null}
-      </section>
+      <aside className="editor-chrome" aria-label="Magic Board editor tools">
+        <div className="editor-chrome-scroll">
+          <SemanticPanel
+            semanticDraft={semanticDraft}
+            selectedCandidateId={selectedCandidateId}
+            onSelectCandidate={setSelectedCandidateId}
+            onAnswer={sendClarificationAnswer}
+            error={semanticError}
+          />
+          <VisualObservationPanel observation={visualObservation} />
+          <VoicePanel
+            voiceStatus={voiceStatus}
+            voiceEvents={voiceEvents}
+            agentTurns={agentTurns}
+            proposals={proposals}
+            permissionRequests={permissionRequests}
+            isRecording={isRecording}
+            onToggleMic={toggleVoice}
+          />
+          <section className="debug-panel" aria-label="Sync status">
+            <div className={`status-dot status-${status}`} />
+            <dl>
+              <div>
+                <dt>Status</dt>
+                <dd>{status}</dd>
+              </div>
+              <div>
+                <dt>Room</dt>
+                <dd>{roomId}</dd>
+              </div>
+              <div>
+                <dt>World</dt>
+                <dd>{selectedRoom?.worldName || selectedRoom?.worldId || 'selected'}</dd>
+              </div>
+              <div>
+                <dt>Reference</dt>
+                <dd>{`${selectedRoom?.stageReference?.platforms?.length || 0} platforms · ${selectedRoom?.stageReference?.portals?.length || 0} portals`}</dd>
+              </div>
+              <div>
+                <dt>Backend</dt>
+                <dd>{backendVersion}</dd>
+              </div>
+              <div>
+                <dt>Version</dt>
+                <dd>{roomVersion}</dd>
+              </div>
+              <div>
+                <dt>Objects</dt>
+                <dd>{projectionCount}</dd>
+              </div>
+              <div>
+                <dt>Draft</dt>
+                <dd>{semanticCandidateCount(semanticDraft)}</dd>
+              </div>
+              <div>
+                <dt>Vision</dt>
+                <dd>{visualObservationLabel(visualObservation)}</dd>
+              </div>
+              <div>
+                <dt>Synced</dt>
+                <dd>{formatTime(lastSyncedAt)}</dd>
+              </div>
+            </dl>
+            {error ? <p>{error}</p> : null}
+          </section>
+        </div>
+      </aside>
     </main>
   )
 }
