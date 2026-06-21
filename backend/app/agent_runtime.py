@@ -43,7 +43,7 @@ def agent_status() -> AgentStatusResponse:
                 hotPath=False,
                 requiredEnv=[],
                 configuredModel=None,
-                message="Vector projection heuristics build semantic drafts without model calls.",
+                message="Vector projection heuristics build candidate geometry; VLM classification is required for auto-apply.",
             ),
             AgentCapabilityStatus(
                 id="vlm_semantic",
@@ -51,7 +51,7 @@ def agent_status() -> AgentStatusResponse:
                 hotPath=False,
                 requiredEnv=["OPENAI_API_KEY"],
                 configuredModel=os.getenv("MAGICBOARD_VLM_MODEL") or DEFAULT_VLM_MODEL,
-                message="Cold-path VLM review observes drawing captures after the deterministic hot path.",
+                message="Phase 1 VLM classification observes drawing candidates and chooses gameplay classes.",
             ),
             AgentCapabilityStatus(
                 id="voice",
@@ -97,7 +97,7 @@ def initial_visual_observation(
             captureVersion=capture_version,
             jobId=visual_job_id(room_id, capture_version),
             model=model,
-            description="OPENAI_API_KEY is not configured; deterministic platform recognition is still active.",
+            description="OPENAI_API_KEY is not configured; Phase 1 VLM classification is required before doodles can auto-apply.",
             errors=["missing OPENAI_API_KEY"],
             updatedAt=datetime.now(UTC),
         )
@@ -108,7 +108,7 @@ def initial_visual_observation(
         captureVersion=capture_version,
         jobId=visual_job_id(room_id, capture_version),
         model=model,
-        description="Observing the drawing with OpenAI vision.",
+        description="Classifying candidate doodles with OpenAI vision.",
         updatedAt=datetime.now(UTC),
     )
 
@@ -252,10 +252,11 @@ def _post_openai_json(url: str, body: dict[str, Any], api_key: str, timeout: int
 
 def _visual_prompt(projection: dict[str, Any] | None) -> str:
     return (
-        "You are observing a 1920x1080 level-editing drawing. Identify visual intent, especially "
-        "platforms, hazards, and decorative marks. Return only compact JSON with keys description and hints. "
-        "Each hint has kind, confidence, description, behavior, and sourceIds. "
-        "Use existing sourceId values when you can. Do not invent gameplay rules."
+        "You classify candidate doodles in a 1920x1080 level editor. The program owns all geometry; "
+        "you only choose the class for each highlighted/recent sourceId. Valid gameplay classes are "
+        "platform, cannon, spikes, portal_endpoint, portal_pair, unknown, or ignore. Return only compact "
+        "JSON with keys description and hints. Each hint has kind, confidence, description, behavior, "
+        "and sourceIds. Use existing sourceId values exactly. Do not invent coordinates or gameplay rules."
         "\nProjection JSON:\n"
         + json.dumps(_safe_projection_context(projection), sort_keys=True)
     )
@@ -275,12 +276,40 @@ def _visual_json_schema() -> dict[str, Any]:
                     "additionalProperties": False,
                     "required": ["kind", "confidence", "description", "behavior", "sourceIds"],
                     "properties": {
-                        "kind": {"type": "string", "enum": ["platform", "hazard", "decor", "unknown"]},
+                        "kind": {
+                            "type": "string",
+                            "enum": [
+                                "platform",
+                                "cannon",
+                                "spikes",
+                                "portal_endpoint",
+                                "portal_pair",
+                                "hazard",
+                                "decor",
+                                "ignore",
+                                "unknown",
+                            ],
+                        },
                         "confidence": {"type": "number"},
                         "description": {"type": "string"},
                         "behavior": {
                             "type": ["string", "null"],
-                            "enum": ["solid", "pass", "bounce", "hurt", "ice", "breakable", "cannon", "decor", "ignore", None],
+                            "enum": [
+                                "solid",
+                                "pass",
+                                "bounce",
+                                "hurt",
+                                "ice",
+                                "breakable",
+                                "cannon",
+                                "spikes",
+                                "portal_endpoint",
+                                "portal_pair",
+                                "unknown",
+                                "decor",
+                                "ignore",
+                                None,
+                            ],
                         },
                         "sourceIds": {"type": "array", "items": {"type": "string"}},
                     },
@@ -301,7 +330,7 @@ def _chat_completion_output_text(response: dict[str, Any]) -> str:
 
 def _clean_hint(raw: dict[str, Any]) -> VisualObservationHint | None:
     kind = str(raw.get("kind") or "unknown").lower()
-    if kind not in {"platform", "hazard", "decor", "unknown"}:
+    if kind not in {"platform", "cannon", "spikes", "portal_endpoint", "portal_pair", "hazard", "decor", "ignore", "unknown"}:
         kind = "unknown"
     behavior = raw.get("behavior")
     if isinstance(behavior, str):
@@ -318,6 +347,14 @@ def _clean_hint(raw: dict[str, Any]) -> VisualObservationHint | None:
             behavior = "breakable"
         elif "cannon" in value:
             behavior = "cannon"
+        elif "spike" in value:
+            behavior = "spikes"
+        elif "portal_pair" in value or "portal pair" in value:
+            behavior = "portal_pair"
+        elif "portal" in value:
+            behavior = "portal_endpoint"
+        elif "unknown" in value:
+            behavior = "unknown"
         elif "decor" in value:
             behavior = "decor"
         elif "ignore" in value:
@@ -465,7 +502,7 @@ async def run_visual_observation(
             captureVersion=capture_version,
             jobId=job_id,
             model=model,
-            description="OpenAI vision observation failed; deterministic recognition is still active.",
+            description="OpenAI vision classification failed; Phase 1 will not auto-apply this capture until VLM classification succeeds.",
             latencyMs=max(0, round((time.perf_counter() - started) * 1000)),
             errors=[str(error)],
             updatedAt=datetime.now(UTC),
@@ -486,10 +523,10 @@ def make_stub_job(
         required_env = ["OPENAI_API_KEY"]
         if os.getenv("OPENAI_API_KEY"):
             status = "stubbed_ready"
-            message = "OPENAI_API_KEY is present; VLM observation runs from capture updates."
+            message = "OPENAI_API_KEY is present; VLM classification runs from capture updates."
         else:
             status = "stubbed_missing_key"
-            message = "Cold-path VLM/LLM review is not configured. Local deterministic semantics still work."
+            message = "Phase 1 VLM classification is not configured. Candidate geometry can be detected but doodles will not auto-apply."
     elif request.modality == "voice":
         required_env = ["DEEPGRAM_API_KEY"]
         status = "unsupported"

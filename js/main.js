@@ -45,13 +45,16 @@
     mode = 'levelPreview';
     setActiveTab('');
     setPreviewSaveState('Save', false);
-    setPreviewApplyState('Apply Platforms', false);
+    setPreviewApplyState('Auto Apply', true);
     DS.LevelPreview.enter(world, {
       onActivity(activeWorld, activity) {
         if (!activeWorld || !worldLibrary) return;
         worldLibrary.updateWorld(activeWorld.id, {
           lastEditedAt: activity && activity.updatedAt ? activity.updatedAt : new Date().toISOString(),
         });
+      },
+      onSemanticDraft(activeWorld, draft) {
+        autoApplyLevelPreviewSemanticDraft(activeWorld, draft);
       },
     });
   }
@@ -132,9 +135,9 @@
         worldId: activeWorld.id,
         roomId: activeWorld.roomId || activeWorld.id,
         mapId,
-        replacePlatforms: true,
+        replacePlatforms: false,
       });
-      if (!patch.operations.length) throw new Error('Confirm at least one platform first.');
+      if (!patch.operations.length) throw new Error('Confirm at least one object first.');
       const result = DS.MagicBoardGame.applyPatch(patch, {
         rebuild() {
           game.mapId = mapId;
@@ -143,25 +146,68 @@
       });
       if (!result.ok) throw new Error(result.errors.join('; '));
 
-      const stage = DS.Maps.stageFor(DS.Store.data, mapId);
-      const platforms = patch.operations
-        .filter((operation) => operation.type === 'add_platform')
-        .map((operation) => operation.platform);
-      const spawns = (stage.spawns && stage.spawns.length >= 2 ? stage.spawns : [{ x: 660, y: 780 }, { x: 1260, y: 780 }]).slice(0, 2);
-      const characters = (DS.Store.data.roster || ['Sprout', 'Acorn']).slice(0, 2);
-      const updated = worldLibrary.updateWorld(activeWorld.id, {
-        lastEditedAt: new Date().toISOString(),
-        mapId,
-        draft: { platforms, spawns, characters },
-      });
+      const updated = syncWorldFromStage(activeWorld, mapId);
       if (updated) DS.LevelPreview.state.world = updated;
       setPreviewApplyState('Applied', true);
-      window.setTimeout(() => setPreviewApplyState('Apply Platforms', false), 1400);
+      window.setTimeout(() => setPreviewApplyState('Auto Apply', true), 1400);
     } catch (error) {
       console.warn('semantic apply failed', error);
       setPreviewApplyState(error && error.message ? error.message : 'Apply failed', false);
-      window.setTimeout(() => setPreviewApplyState('Apply Platforms', false), 2200);
+      window.setTimeout(() => setPreviewApplyState('Auto Apply', true), 2200);
     }
+  }
+
+  const autoAppliedKeys = new Set();
+  function autoApplyLevelPreviewSemanticDraft(activeWorld, draft) {
+    if (!activeWorld || !draft || !DS.MagicBoardGame || !worldLibrary) return;
+    const key = [
+      activeWorld.id,
+      draft.captureVersion || 0,
+      (draft.answers || []).map((answer) => answer.answerId || answer.candidateId).sort().join('|'),
+    ].join(':');
+    if (autoAppliedKeys.has(key)) return;
+    const patch = DS.MagicBoardGame.buildPatchFromSemanticDraft(draft, {
+      worldId: activeWorld.id,
+      roomId: activeWorld.roomId || activeWorld.id,
+      mapId: activeWorld.mapId || 'meadow',
+      replacePlatforms: false,
+    });
+    if (!patch.operations.length) return;
+    const result = DS.MagicBoardGame.applyPatch(patch, {
+      rebuild() {
+        if (game.mapId === (activeWorld.mapId || 'meadow')) game.rebuild();
+      },
+    });
+    if (!result.ok) {
+      console.warn('semantic auto-apply failed', result.errors);
+      return;
+    }
+    autoAppliedKeys.add(key);
+    const updated = syncWorldFromStage(activeWorld, activeWorld.mapId || 'meadow');
+    if (updated && DS.LevelPreview && DS.LevelPreview.state.world && DS.LevelPreview.state.world.id === updated.id) {
+      DS.LevelPreview.state.world = updated;
+    }
+    setPreviewApplyState('Auto applied', true);
+    window.setTimeout(() => setPreviewApplyState('Auto Apply', true), 1200);
+  }
+
+  function syncWorldFromStage(activeWorld, mapId) {
+    if (!activeWorld || !worldLibrary) return null;
+    const stage = DS.Maps.stageFor(DS.Store.data, mapId);
+    const spawns = (stage.spawns && stage.spawns.length >= 2 ? stage.spawns : [{ x: 660, y: 780 }, { x: 1260, y: 780 }]).slice(0, 2);
+    const characters = (activeWorld.draft && activeWorld.draft.characters && activeWorld.draft.characters.length
+      ? activeWorld.draft.characters
+      : (DS.Store.data.roster || ['Sprout', 'Acorn']).slice(0, 2));
+    return worldLibrary.updateWorld(activeWorld.id, {
+      lastEditedAt: new Date().toISOString(),
+      mapId,
+      draft: {
+        platforms: stage.platforms || [],
+        portals: stage.portals || [],
+        spawns,
+        characters,
+      },
+    });
   }
 
   function openHomeLibrary() {
@@ -188,7 +234,7 @@
   };
   const worldLibrary = DS.WorldLibrary && DS.WorldLibrary.init({
     onEdit(world) {
-      enterWorldStageEditor(world);
+      enterLevelPreview(world);
     },
     onPlay(world) {
       exitLevelPreview();

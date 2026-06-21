@@ -24,6 +24,7 @@
     reconnectTimer: 0,
     activityTimer: 0,
     onActivity: null,
+    onSemanticDraft: null,
     enterSeq: 0,
     selectionController: null,
   };
@@ -60,6 +61,19 @@
     return url.toString();
   }
 
+  function stageReferenceForWorld(world) {
+    const mapId = world && (world.mapId || world.id);
+    const stage = mapId && DS.Maps && DS.Store && DS.Store.data ? DS.Maps.stageFor(DS.Store.data, mapId) : null;
+    const bounds = stage && stage.bounds ? stage.bounds : { x0: 0, y0: 0, x1: 1920, y1: 1080 };
+    return {
+      view: { w: Math.max(1, bounds.x1 - bounds.x0), h: Math.max(1, bounds.y1 - bounds.y0), x: bounds.x0, y: bounds.y0 },
+      bounds,
+      platforms: stage && Array.isArray(stage.platforms) ? DS.data.clone(stage.platforms) : [],
+      portals: stage && Array.isArray(stage.portals) ? DS.data.clone(stage.portals) : [],
+      spawns: stage && Array.isArray(stage.spawns) ? DS.data.clone(stage.spawns) : [],
+    };
+  }
+
   function publishSelection(backendUrl, world, roomId) {
     if (!global.fetch || !world || !roomId) return;
     if (state.selectionController) state.selectionController.abort();
@@ -72,6 +86,7 @@
         roomId,
         worldId: world.id || roomId,
         worldName: world.name || 'Untitled',
+        stageReference: stageReferenceForWorld(world),
       }),
     }).catch((error) => {
       if (error && error.name === 'AbortError') return;
@@ -136,6 +151,7 @@
       clearTimeout(state.activityTimer);
       state.activityTimer = setTimeout(() => state.onActivity(state.world, { version: state.version, updatedAt }), 80);
     }
+    if (state.onSemanticDraft && semanticDraft) state.onSemanticDraft(state.world, semanticDraft);
   }
 
   function syncUi() {
@@ -154,8 +170,8 @@
       const draft = state.semanticDraft || {};
       const total = (draft.candidates || []).length || ((projection.strokes || []).length + (projection.shapes || []).length);
       const confirmed = (draft.candidates || []).filter((candidate) => candidate.status === 'confirmed').length;
-      if (confirmed) count.textContent = confirmed + ' platform' + (confirmed === 1 ? '' : 's') + ' ready to apply';
-      else count.textContent = total ? confirmed + '/' + total + ' confirmed' : 'Draw platforms on the iPad';
+      if (confirmed) count.textContent = confirmed + ' object' + (confirmed === 1 ? '' : 's') + ' auto-applied';
+      else count.textContent = total ? confirmed + '/' + total + ' confirmed' : 'Draw stage objects on the iPad';
     }
   }
 
@@ -265,6 +281,7 @@
     state.semanticDraft = null;
     state.visualObservation = null;
     state.onActivity = options.onActivity || null;
+    state.onSemanticDraft = options.onSemanticDraft || null;
     syncUi();
     publishSelection(backend, world, state.roomId);
     if (saved) {
@@ -298,6 +315,7 @@
     state.projection = null;
     state.semanticDraft = null;
     state.visualObservation = null;
+    state.onSemanticDraft = null;
     syncUi();
     if (shouldClearSelection) clearSelection(backendUrl);
   }
@@ -352,6 +370,21 @@
       passes: 1,
       jitter: 0.6,
     });
+    ctx.restore();
+  }
+
+  function drawReferencePortal(ctx, portal) {
+    if (!portal || !Number.isFinite(portal.x) || !Number.isFinite(portal.y)) return;
+    ctx.save();
+    ctx.globalAlpha = 0.84;
+    ctx.strokeStyle = portal.col || '#2f6fe0';
+    ctx.lineWidth = 7;
+    ctx.beginPath();
+    ctx.arc(portal.x, portal.y, portal.r || 44, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 0.22;
+    ctx.fillStyle = portal.col || '#2f6fe0';
+    ctx.fill();
     ctx.restore();
   }
 
@@ -502,6 +535,7 @@
     ctx.restore();
 
     platforms.forEach((platform, index) => drawReferencePlatform(ctx, platform, index));
+    (stage.portals || []).forEach((portal) => drawReferencePortal(ctx, portal));
 
     const projection = state.projection || {};
     const semanticDraft = state.semanticDraft || {};

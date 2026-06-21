@@ -33,6 +33,7 @@
   function defaultDraft() {
     return {
       platforms: [],
+      portals: [],
       spawns: defaultSpawns(),
       characters: defaultCharacters(),
     };
@@ -42,6 +43,7 @@
     const draft = world && world.draft && typeof world.draft === 'object' ? world.draft : {};
     return {
       platforms: Array.isArray(draft.platforms) ? draft.platforms : [],
+      portals: Array.isArray(draft.portals) ? draft.portals : [],
       spawns: Array.isArray(draft.spawns) ? draft.spawns : [],
       characters: Array.isArray(draft.characters) ? draft.characters : [],
     };
@@ -63,7 +65,9 @@
 
   function missingRequirements(world) {
     const draft = draftFor(world);
+    const stage = stageForWorld(world);
     const missing = [];
+    if (!hasPlayableObjects(stage)) missing.push('playable stage objects');
     if (draft.spawns.length < 2) missing.push('2 spawn points');
     if (draft.characters.length < REQUIRED_CHARACTER_COUNT) missing.push('required characters');
     return missing;
@@ -71,7 +75,9 @@
 
   function statusFor(world) {
     const draft = draftFor(world);
-    if (draft.platforms.length < 1 && draft.spawns.length < 1 && draft.characters.length < 1) return STATUS.draft;
+    const stage = stageForWorld(world);
+    if (!hasPlayableObjects(stage) && draft.spawns.length < 1 && draft.characters.length < 1) return STATUS.draft;
+    if (!hasPlayableObjects(stage)) return STATUS.draft;
     if (draft.spawns.length < 2) return STATUS.missingSpawnPoints;
     if (draft.characters.length < REQUIRED_CHARACTER_COUNT) return STATUS.missingCharacters;
     return STATUS.ready;
@@ -100,8 +106,31 @@
       mapId: world.id || id,
     };
     ensureWorldStage(out);
+    out.draft = draftFromStage(out, out.draft);
     out.status = statusFor(out).id;
     return out;
+  }
+
+  function stageForWorld(world) {
+    if (!world || !DS.Store || !DS.Store.data || !DS.Maps) return null;
+    return DS.Maps.stageFor(DS.Store.data, world.mapId || world.id);
+  }
+
+  function hasPlayableObjects(stage) {
+    if (!stage) return false;
+    return (Array.isArray(stage.platforms) && stage.platforms.length > 0)
+      || (Array.isArray(stage.portals) && stage.portals.length > 0);
+  }
+
+  function draftFromStage(world, fallbackDraft) {
+    const stage = stageForWorld(world);
+    const fallback = fallbackDraft || defaultDraft();
+    return {
+      platforms: stage && Array.isArray(stage.platforms) ? DS.data.clone(stage.platforms) : (fallback.platforms || []),
+      portals: stage && Array.isArray(stage.portals) ? DS.data.clone(stage.portals) : (fallback.portals || []),
+      spawns: stage && Array.isArray(stage.spawns) ? DS.data.clone(stage.spawns) : (fallback.spawns || []),
+      characters: Array.isArray(fallback.characters) && fallback.characters.length ? fallback.characters : defaultCharacters(),
+    };
   }
 
   function ensureWorldStage(world) {
@@ -246,12 +275,19 @@
       const stage = ensureWorldStage(world);
       const baseBounds = stage && stage.bounds ? stage.bounds : { x0: 0, y0: 0, x1: 1920, y1: 1080 };
       const platforms = stage && Array.isArray(stage.platforms) ? stage.platforms : [];
+      const portals = stage && Array.isArray(stage.portals) ? stage.portals : [];
       const bounds = { x0: baseBounds.x0, y0: baseBounds.y0, x1: baseBounds.x1, y1: baseBounds.y1 };
       platforms.forEach((platform) => {
         bounds.x0 = Math.min(bounds.x0, platform.x);
         bounds.y0 = Math.min(bounds.y0, platform.y);
         bounds.x1 = Math.max(bounds.x1, platform.x + platform.w);
         bounds.y1 = Math.max(bounds.y1, platform.y + platform.h);
+      });
+      portals.forEach((portal) => {
+        bounds.x0 = Math.min(bounds.x0, portal.x - portal.r);
+        bounds.y0 = Math.min(bounds.y0, portal.y - portal.r);
+        bounds.x1 = Math.max(bounds.x1, portal.x + portal.r);
+        bounds.y1 = Math.max(bounds.y1, portal.y + portal.r);
       });
       const sketch = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       sketch.setAttribute('viewBox', bounds.x0 + ' ' + bounds.y0 + ' ' + (bounds.x1 - bounds.x0) + ' ' + (bounds.y1 - bounds.y0));
@@ -272,6 +308,14 @@
         rect.setAttribute('rx', String(Math.min(platform.h / 2, 22)));
         rect.setAttribute('class', 'world-thumb-platform' + (platform.pass ? ' pass' : ''));
         sketch.appendChild(rect);
+      });
+      portals.forEach((portal) => {
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', String(portal.x));
+        circle.setAttribute('cy', String(portal.y));
+        circle.setAttribute('r', String(portal.r || 42));
+        circle.setAttribute('class', 'world-thumb-platform pass');
+        sketch.appendChild(circle);
       });
       thumb.appendChild(sketch);
       thumb.appendChild(mk('span', 'world-thumb-label', 'Thumbnail pending'));
@@ -391,6 +435,7 @@
       updateWorld,
       saveDrawingCapture,
       drawClientUrl,
+      draftFromStage,
     };
   }
 
@@ -402,6 +447,7 @@
     updateWorld,
     ensureWorldStage,
     saveDrawingCapture,
+    draftFromStage,
     statusFor,
     missingRequirements,
     isReady,

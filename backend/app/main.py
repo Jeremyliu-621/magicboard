@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 
 from .agent_runtime import agent_status, run_visual_observation
-from .rooms import rooms
+from .rooms import rooms, selection_payload
 from .schemas import (
     AgentJobRequest,
     BACKEND_VERSION,
@@ -112,7 +112,7 @@ async def enqueue_agent_job(room_id: str, request: AgentJobRequest) -> dict[str,
 
 @app.get("/selection/current")
 async def get_current_selection() -> dict[str, Any]:
-    return rooms.current_selection().model_dump(mode="json", by_alias=True)
+    return selection_payload(rooms.current_selection())
 
 
 @app.post("/selection/current")
@@ -121,16 +121,17 @@ async def set_current_selection(selection: RoomSelectionRequest) -> dict[str, An
         room_id=selection.room_id,
         world_id=selection.world_id,
         world_name=selection.world_name,
+        stage_reference=selection.stage_reference,
     )
     await rooms.broadcast_selection()
-    return current.model_dump(mode="json", by_alias=True)
+    return selection_payload(current)
 
 
 @app.delete("/selection/current")
 async def clear_current_selection() -> dict[str, Any]:
     current = rooms.clear_selection()
     await rooms.broadcast_selection()
-    return current.model_dump(mode="json", by_alias=True)
+    return selection_payload(current)
 
 
 @app.websocket("/ws/selection")
@@ -140,7 +141,7 @@ async def selection_socket(websocket: WebSocket) -> None:
     await websocket.send_json(
         {
             "type": "selection_hello",
-            **rooms.current_selection().model_dump(mode="json", by_alias=True),
+            **selection_payload(rooms.current_selection()),
         }
     )
     try:

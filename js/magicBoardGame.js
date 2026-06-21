@@ -5,7 +5,7 @@
 
   const DS = global.DS = global.DS || {};
   const ALLOWED_KINDS = new Set(['ground', 'wood', 'stone', 'crystal', 'box', 'float', 'trampoline', 'spikes', 'cannon', 'drawn']);
-  const ALLOWED_OPS = new Set(['replace_platforms', 'add_platform', 'set_spawns']);
+  const ALLOWED_OPS = new Set(['replace_platforms', 'add_platform', 'add_portal_pair', 'remove_generated', 'set_spawns']);
 
   function finite(value) {
     return typeof value === 'number' && Number.isFinite(value);
@@ -19,9 +19,36 @@
     return { ok: false, errors: [message] };
   }
 
+  function sourceFromCandidate(candidate) {
+    return {
+      kind: 'magicboard_agent',
+      roomId: candidate.roomId,
+      worldId: candidate.worldId || null,
+      captureVersion: candidate.captureVersion,
+      candidateId: candidate.candidateId,
+      candidateVersion: candidate.candidateVersion || 1,
+      geometryHash: candidate.geometryHash,
+      sourceIds: candidate.sourceIds || [],
+    };
+  }
+
+  function classForCandidate(candidate) {
+    const answer = candidate && (candidate.answer || candidate.classification);
+    const role = answer && answer.role;
+    const behavior = answer && answer.behavior;
+    if (role === 'cannon' || behavior === 'cannon') return 'cannon';
+    if (role === 'spikes' || behavior === 'spikes' || behavior === 'hurt') return 'spikes';
+    if (role === 'portal_pair' || behavior === 'portal_pair') return 'portal_pair';
+    if (role === 'portal_endpoint' || behavior === 'portal_endpoint') return 'portal_endpoint';
+    if (role === 'platform' || ['solid', 'pass', 'bounce', 'ice', 'breakable'].includes(behavior)) return 'platform';
+    if (role === 'ignore' || behavior === 'ignore') return 'ignore';
+    return candidate && candidate.semanticType ? candidate.semanticType : 'unknown';
+  }
+
   function platformFromCandidate(candidate) {
     if (!candidate || candidate.status !== 'confirmed' || !candidate.geometry || !candidate.answer) return null;
-    if (candidate.answer.role !== 'platform') return null;
+    const objectClass = classForCandidate(candidate);
+    if (!['platform', 'cannon', 'spikes'].includes(objectClass)) return null;
     const g = candidate.geometry;
     const behavior = candidate.answer.behavior || 'solid';
     const platform = {
@@ -31,26 +58,25 @@
       h: Math.max(18, Math.round(g.h)),
       kind: 'drawn',
       pass: false,
-      source: {
-        kind: 'magicboard_agent',
-        roomId: candidate.roomId,
-        worldId: candidate.worldId || null,
-        captureVersion: candidate.captureVersion,
-        candidateId: candidate.candidateId,
-        geometryHash: candidate.geometryHash,
-        sourceIds: candidate.sourceIds || [],
-      },
+      source: sourceFromCandidate(candidate),
     };
 
-    if (behavior === 'pass') {
+    if (objectClass === 'cannon') {
+      platform.kind = 'cannon';
+      platform.pass = false;
+      platform.fire = { deg: 0, every: 2.0, speed: 880, damage: 11, kbBase: 32, kbScale: 0.12, r: 26, delay: 0 };
+    } else if (objectClass === 'spikes') {
+      platform.kind = 'spikes';
+      platform.hurt = { damage: 26, kbBase: 40, kbScale: 0.18, cooldown: 0.6 };
+    } else if (behavior === 'pass') {
       platform.kind = 'float';
       platform.pass = true;
     } else if (behavior === 'bounce') {
       platform.kind = 'trampoline';
       platform.bounce = 1200;
-    } else if (behavior === 'hurt') {
+    } else if (behavior === 'hurt' || behavior === 'spikes') {
       platform.kind = 'spikes';
-      platform.hurt = { damage: 18, kbBase: 34, kbScale: 0.14, cooldown: 0.7 };
+      platform.hurt = { damage: 26, kbBase: 40, kbScale: 0.18, cooldown: 0.6 };
     } else if (behavior === 'ice') {
       platform.kind = 'crystal';
     } else if (behavior === 'breakable') {
@@ -64,12 +90,31 @@
     return platform;
   }
 
+  function portalPairFromCandidate(candidate) {
+    if (!candidate || candidate.status !== 'confirmed' || !candidate.answer) return null;
+    if (classForCandidate(candidate) !== 'portal_pair') return null;
+    const endpoints = Array.isArray(candidate.portalEndpoints) ? candidate.portalEndpoints : [];
+    if (endpoints.length < 2) return null;
+    const source = sourceFromCandidate(candidate);
+    const pairId = 'mb-' + String(candidate.candidateId || 'portal').replace(/[^a-zA-Z0-9_-]/g, '').slice(-18);
+    const a = endpoints[0];
+    const b = endpoints[1];
+    return {
+      a: { id: pairId + '-a', x: Math.round(a.x), y: Math.round(a.y), r: Math.max(30, Math.round(a.r || 46)), col: '#2f6fe0', link: pairId + '-b', source },
+      b: { id: pairId + '-b', x: Math.round(b.x), y: Math.round(b.y), r: Math.max(30, Math.round(b.r || 46)), col: '#2f6fe0', link: pairId + '-a', source },
+    };
+  }
+
   function buildPatchFromSemanticDraft(draft, options) {
     options = options || {};
-    const platforms = (draft && draft.candidates ? draft.candidates : [])
-      .map(platformFromCandidate)
-      .filter(Boolean);
-    const operations = platforms.map((platform) => ({ type: 'add_platform', platform }));
+    const candidates = draft && draft.candidates ? draft.candidates : [];
+    const operations = [];
+    candidates.forEach((candidate) => {
+      const platform = platformFromCandidate(candidate);
+      if (platform) operations.push({ type: 'add_platform', platform });
+      const portalPair = portalPairFromCandidate(candidate);
+      if (portalPair) operations.push({ type: 'add_portal_pair', portalPair });
+    });
     if (options.replacePlatforms) operations.unshift({ type: 'replace_platforms' });
     return {
       type: 'magicboard_world_patch',
@@ -80,6 +125,23 @@
       target: { mapId: options.mapId || 'meadow' },
       operations,
     };
+  }
+
+  function validatePortalPair(portalPair, index) {
+    const errors = [];
+    if (!portalPair || typeof portalPair !== 'object') return ['operation ' + index + ' portalPair is required'];
+    ['a', 'b'].forEach((key) => {
+      const endpoint = portalPair[key];
+      if (!endpoint || typeof endpoint !== 'object') {
+        errors.push('operation ' + index + ' portalPair.' + key + ' is required');
+        return;
+      }
+      ['x', 'y', 'r'].forEach((field) => {
+        if (!finite(endpoint[field])) errors.push('operation ' + index + ' portalPair.' + key + '.' + field + ' must be finite');
+      });
+      if (finite(endpoint.r) && (endpoint.r < 20 || endpoint.r > 200)) errors.push('operation ' + index + ' portalPair.' + key + '.r out of range');
+    });
+    return errors;
   }
 
   function validatePlatform(platform, index) {
@@ -114,6 +176,7 @@
       }
       if (operation.type === 'replace_platforms') return;
       if (operation.type === 'add_platform') errors.push.apply(errors, validatePlatform(operation.platform, index));
+      if (operation.type === 'add_portal_pair') errors.push.apply(errors, validatePortalPair(operation.portalPair, index));
       if (operation.type === 'set_spawns') {
         const spawns = operation.spawns || [];
         if (!Array.isArray(spawns) || spawns.length < 2) errors.push('operation ' + index + ' requires at least two spawns');
@@ -124,6 +187,11 @@
 
   function sameGeneratedSource(platform, incomingIds) {
     const source = platform && platform.source;
+    return source && source.kind === 'magicboard_agent' && incomingIds.has(source.candidateId);
+  }
+
+  function sameGeneratedPortal(portal, incomingIds) {
+    const source = portal && portal.source;
     return source && source.kind === 'magicboard_agent' && incomingIds.has(source.candidateId);
   }
 
@@ -140,10 +208,15 @@
     patch.operations.forEach((operation) => {
       if (operation.type === 'add_platform' && operation.platform && operation.platform.source) {
         incomingCandidateIds.add(operation.platform.source.candidateId);
+      } else if (operation.type === 'add_portal_pair' && operation.portalPair && operation.portalPair.a && operation.portalPair.a.source) {
+        incomingCandidateIds.add(operation.portalPair.a.source.candidateId);
+      } else if (operation.type === 'remove_generated' && operation.candidateId) {
+        incomingCandidateIds.add(operation.candidateId);
       }
     });
     if (incomingCandidateIds.size) {
       stage.platforms = (stage.platforms || []).filter((platform) => !sameGeneratedSource(platform, incomingCandidateIds));
+      stage.portals = (stage.portals || []).filter((portal) => !sameGeneratedPortal(portal, incomingCandidateIds));
     }
 
     if (patch.operations.some((operation) => operation.type === 'replace_platforms')) {
@@ -154,6 +227,10 @@
       if (operation.type === 'add_platform') {
         stage.platforms = stage.platforms || [];
         stage.platforms.push(clone(operation.platform));
+      } else if (operation.type === 'add_portal_pair') {
+        stage.portals = stage.portals || [];
+        const pair = operation.portalPair;
+        stage.portals.push(clone(pair.a), clone(pair.b));
       } else if (operation.type === 'set_spawns') {
         stage.spawns = clone(operation.spawns);
       }
@@ -166,13 +243,16 @@
       applied: patch.operations.length,
       mapId: patch.target.mapId,
       platformCount: (stage.platforms || []).length,
+      portalCount: (stage.portals || []).length,
     };
   }
 
   DS.MagicBoardGame = {
     applyPatch,
     buildPatchFromSemanticDraft,
+    classForCandidate,
     platformFromCandidate,
+    portalPairFromCandidate,
     validatePatch,
   };
   global.MagicBoardGame = DS.MagicBoardGame;

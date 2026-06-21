@@ -122,6 +122,14 @@ body {
   fill: #f7f4ec;
 }
 
+.reference-bounds {
+  fill: none;
+  stroke: #b9afa0;
+  stroke-dasharray: 18 14;
+  stroke-width: 3px;
+  vector-effect: non-scaling-stroke;
+}
+
 .reference-platform-shadow {
   fill: #2f2a26;
   opacity: 0.08;
@@ -144,6 +152,33 @@ body {
   stroke-linecap: round;
   opacity: 0.74;
   vector-effect: non-scaling-stroke;
+}
+
+.reference-portal-fill {
+  fill: #2f6fe0;
+  opacity: 0.12;
+}
+
+.reference-portal-ring {
+  fill: none;
+  stroke: #2f6fe0;
+  stroke-width: 7px;
+  vector-effect: non-scaling-stroke;
+}
+
+.reference-spawn {
+  fill: rgba(63, 143, 134, 0.13);
+  stroke: #3f8f86;
+  stroke-dasharray: 8 8;
+  stroke-width: 4px;
+  vector-effect: non-scaling-stroke;
+}
+
+.reference-spawn-label {
+  fill: #3f8f86;
+  font: 700 24px system-ui, sans-serif;
+  text-anchor: middle;
+  user-select: none;
 }
 
 .semantic-candidate-layer {

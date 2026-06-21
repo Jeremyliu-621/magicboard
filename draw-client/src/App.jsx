@@ -8,14 +8,13 @@ import {
   renderPlaintextFromRichText,
   toRichText,
 } from 'tldraw'
-import '../../js/stageReferenceData.js'
 
 const DEFAULT_BACKEND_PORT = '8000'
 const SYNC_DEBOUNCE_MS = 120
 const RECONNECT_DELAY_MS = 1000
 const GAME_FRAME = { x: 0, y: 0, w: 1920, h: 1080 }
 const FRAME_SHAPE_ID = createShapeId('magicboard-stage-frame')
-const STAGE_REFERENCE = globalThis.DS?.stageReference || { view: { w: GAME_FRAME.w, h: GAME_FRAME.h }, platforms: [] }
+const EMPTY_STAGE_REFERENCE = { view: { w: GAME_FRAME.w, h: GAME_FRAME.h }, platforms: [], portals: [], spawns: [] }
 
 const SIZE_TO_WIDTH = {
   s: 3,
@@ -295,9 +294,13 @@ function platformClassName(platform) {
   return `reference-platform reference-platform-${kind}${platform.pass ? ' reference-platform-pass' : ''}`
 }
 
-function PlatformReferenceLayer() {
-  const view = STAGE_REFERENCE.view || { w: GAME_FRAME.w, h: GAME_FRAME.h }
-  const platforms = STAGE_REFERENCE.platforms || []
+function PlatformReferenceLayer({ stageReference }) {
+  const reference = stageReference || EMPTY_STAGE_REFERENCE
+  const view = reference.view || { w: GAME_FRAME.w, h: GAME_FRAME.h }
+  const bounds = reference.bounds || { x0: 0, y0: 0, x1: view.w, y1: view.h }
+  const platforms = reference.platforms || []
+  const portals = reference.portals || []
+  const spawns = reference.spawns || []
 
   return (
     <div
@@ -313,6 +316,7 @@ function PlatformReferenceLayer() {
         focusable="false"
       >
         <rect className="reference-view-fill" x="0" y="0" width={view.w} height={view.h} />
+        <rect className="reference-bounds" x={bounds.x0 || 0} y={bounds.y0 || 0} width={(bounds.x1 || view.w) - (bounds.x0 || 0)} height={(bounds.y1 || view.h) - (bounds.y0 || 0)} />
         {platforms.map((platform, index) => {
           const radius = Math.min(platform.h / 2, platform.pass ? 16 : 20)
           return (
@@ -345,6 +349,18 @@ function PlatformReferenceLayer() {
             </g>
           )
         })}
+        {portals.map((portal, index) => (
+          <g key={`portal-${portal.id || index}`}>
+            <circle className="reference-portal-fill" cx={portal.x} cy={portal.y} r={portal.r || 44} />
+            <circle className="reference-portal-ring" cx={portal.x} cy={portal.y} r={portal.r || 44} />
+          </g>
+        ))}
+        {spawns.map((spawn, index) => (
+          <g key={`spawn-${index}`}>
+            <circle className="reference-spawn" cx={spawn.x} cy={spawn.y} r="24" />
+            <text className="reference-spawn-label" x={spawn.x} y={spawn.y + 8}>{index + 1}</text>
+          </g>
+        ))}
       </svg>
     </div>
   )
@@ -512,6 +528,7 @@ export default function App() {
   const localHadUserContentRef = useRef(false)
   const userInteractedRef = useRef(false)
   const clientIdRef = useRef(createClientId())
+  const previousSourceIdsRef = useRef(new Set())
 
   const [status, setStatus] = useState('idle')
   const [backendVersion, setBackendVersion] = useState('unknown')
@@ -528,12 +545,12 @@ export default function App() {
     () => ({
       OnTheCanvas: () => (
         <>
-          <PlatformReferenceLayer />
+          <PlatformReferenceLayer stageReference={selectedRoom?.stageReference} />
           <SemanticCandidateLayer semanticDraft={semanticDraft} selectedCandidateId={selectedCandidateId} />
         </>
       ),
     }),
-    [semanticDraft, selectedCandidateId],
+    [semanticDraft, selectedCandidateId, selectedRoom?.stageReference],
   )
 
   useEffect(() => {
@@ -572,6 +589,7 @@ export default function App() {
             current?.roomId === selection.roomId
             && current?.worldId === selection.worldId
             && current?.worldName === selection.worldName
+            && JSON.stringify(current?.stageReference || null) === JSON.stringify(selection.stageReference || null)
           ) {
             return current
           }
@@ -579,6 +597,7 @@ export default function App() {
             roomId: selection.roomId,
             worldId: selection.worldId || selection.roomId,
             worldName: selection.worldName || null,
+            stageReference: selection.stageReference || EMPTY_STAGE_REFERENCE,
           }
         })
       } else {
@@ -646,6 +665,7 @@ export default function App() {
     setSemanticError('')
     localHadUserContentRef.current = false
     userInteractedRef.current = false
+    previousSourceIdsRef.current = new Set()
   }, [roomId])
 
   const activePendingCandidate = useMemo(() => {
@@ -675,6 +695,13 @@ export default function App() {
     const { document } = getSnapshot(editor.store)
     const projection = makeProjection(editor, document)
     const objectCount = projectionObjectCount(projection)
+    const sourceIds = new Set([
+      ...(projection.strokes || []).map((item) => item.sourceId),
+      ...(projection.shapes || []).map((item) => item.sourceId),
+      ...(projection.labels || []).map((item) => item.sourceId),
+    ].filter(Boolean))
+    const changedSourceIds = [...sourceIds].filter((sourceId) => !previousSourceIdsRef.current.has(sourceId))
+    previousSourceIdsRef.current = sourceIds
     setProjectionCount(objectCount)
 
     if (objectCount > 0) localHadUserContentRef.current = true
@@ -691,6 +718,7 @@ export default function App() {
         type: 'canvas_capture',
         capture: document,
         projection,
+        changedSourceIds,
         worldId: selectedRoom?.worldId || roomId,
         clientId: clientIdRef.current,
         sentAt: new Date().toISOString(),
@@ -921,7 +949,7 @@ export default function App() {
           </div>
           <div>
             <dt>Reference</dt>
-            <dd>{`${STAGE_REFERENCE.platforms?.length || 0} platforms`}</dd>
+            <dd>{`${selectedRoom?.stageReference?.platforms?.length || 0} platforms · ${selectedRoom?.stageReference?.portals?.length || 0} portals`}</dd>
           </div>
           <div>
             <dt>Backend</dt>

@@ -26,6 +26,12 @@ class SemanticGeometry(BaseModel):
     h: float
 
 
+class PortalEndpointGeometry(BaseModel):
+    x: float
+    y: float
+    r: float
+
+
 class SemanticChoice(BaseModel):
     id: Literal[
         "yes_platform",
@@ -38,10 +44,27 @@ class SemanticChoice(BaseModel):
         "icy",
         "breakable",
         "cannon",
+        "spikes",
+        "portal_endpoint",
+        "portal_pair",
     ]
     label: str
-    role: Literal["platform", "ignore", "decor"]
-    behavior: Literal["solid", "pass", "bounce", "hurt", "ice", "breakable", "cannon", "decor", "ignore"]
+    role: Literal["platform", "cannon", "spikes", "portal_endpoint", "portal_pair", "unknown", "ignore", "decor"]
+    behavior: Literal[
+        "solid",
+        "pass",
+        "bounce",
+        "hurt",
+        "ice",
+        "breakable",
+        "cannon",
+        "spikes",
+        "portal_endpoint",
+        "portal_pair",
+        "unknown",
+        "decor",
+        "ignore",
+    ]
 
 
 class SemanticQuestion(BaseModel):
@@ -66,8 +89,24 @@ class SemanticAnswer(BaseModel):
     question_id: str = Field(alias="questionId")
     candidate_id: str = Field(alias="candidateId")
     choice_id: str = Field(alias="choiceId")
-    role: Literal["platform", "ignore", "decor"] = "platform"
-    behavior: Literal["solid", "pass", "bounce", "hurt", "ice", "breakable", "cannon", "decor", "ignore"] = "solid"
+    role: Literal["platform", "cannon", "spikes", "portal_endpoint", "portal_pair", "unknown", "ignore", "decor"] = "platform"
+    behavior: Literal[
+        "solid",
+        "pass",
+        "bounce",
+        "hurt",
+        "ice",
+        "breakable",
+        "cannon",
+        "spikes",
+        "portal_endpoint",
+        "portal_pair",
+        "unknown",
+        "decor",
+        "ignore",
+    ] = "solid"
+    confidence: float | None = None
+    classifier: Literal["manual", "vlm", "deterministic"] = "manual"
     room_id: str = Field(alias="roomId")
     world_id: str | None = Field(default=None, alias="worldId")
     capture_version: int = Field(alias="captureVersion")
@@ -81,11 +120,22 @@ class SemanticCandidate(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     candidate_id: str = Field(alias="candidateId")
-    type: Literal["platform_candidate"] = "platform_candidate"
+    type: Literal["semantic_candidate"] = "semantic_candidate"
     status: Literal["needs_answer", "confirmed", "ignored", "decor"] = "needs_answer"
-    extractor: Literal["rectangle", "stroke", "grouped_strokes", "stage_tool"]
+    semantic_type: Literal[
+        "platform",
+        "cannon",
+        "spikes",
+        "portal_endpoint",
+        "portal_pair",
+        "unknown",
+    ] = Field(default="unknown", alias="semanticType")
+    candidate_version: int = Field(default=1, alias="candidateVersion")
+    classification: SemanticAnswer | None = None
+    extractor: Literal["rectangle", "stroke", "grouped_strokes", "compact_glyph", "circle", "portal_pair", "stage_tool"]
     confidence: float
     geometry: SemanticGeometry
+    portal_endpoints: list[PortalEndpointGeometry] = Field(default_factory=list, alias="portalEndpoints")
     source_ids: list[str] = Field(alias="sourceIds")
     geometry_hash: str = Field(alias="geometryHash")
     room_id: str = Field(alias="roomId")
@@ -115,10 +165,24 @@ class SemanticDraft(BaseModel):
 class VisualObservationHint(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    kind: Literal["platform", "hazard", "decor", "unknown"]
+    kind: Literal["platform", "cannon", "spikes", "portal_endpoint", "portal_pair", "hazard", "decor", "ignore", "unknown"]
     confidence: float
     description: str
-    behavior: Literal["solid", "pass", "bounce", "hurt", "ice", "breakable", "cannon", "decor", "ignore"] | None = None
+    behavior: Literal[
+        "solid",
+        "pass",
+        "bounce",
+        "hurt",
+        "ice",
+        "breakable",
+        "cannon",
+        "spikes",
+        "portal_endpoint",
+        "portal_pair",
+        "unknown",
+        "decor",
+        "ignore",
+    ] | None = None
     source_ids: list[str] = Field(default_factory=list, alias="sourceIds")
     geometry: SemanticGeometry | None = None
 
@@ -159,6 +223,7 @@ class RoomSelectionRequest(BaseModel):
     room_id: str = Field(alias="roomId")
     world_id: str | None = Field(default=None, alias="worldId")
     world_name: str | None = Field(default=None, alias="worldName")
+    stage_reference: dict[str, Any] | None = Field(default=None, alias="stageReference")
 
 
 class RoomSelectionResponse(BaseModel):
@@ -167,6 +232,7 @@ class RoomSelectionResponse(BaseModel):
     room_id: str | None = Field(default=None, alias="roomId")
     world_id: str | None = Field(default=None, alias="worldId")
     world_name: str | None = Field(default=None, alias="worldName")
+    stage_reference: dict[str, Any] | None = Field(default=None, alias="stageReference")
     selected_at: datetime | None = Field(default=None, alias="selectedAt")
 
 
@@ -198,6 +264,9 @@ class ClarificationAnswerMessage(BaseModel):
         "icy",
         "breakable",
         "cannon",
+        "spikes",
+        "portal_endpoint",
+        "portal_pair",
     ] = Field(alias="choiceId")
     capture_version: int = Field(alias="captureVersion")
     source_ids: list[str] = Field(alias="sourceIds")

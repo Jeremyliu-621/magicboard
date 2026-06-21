@@ -401,6 +401,30 @@ def test_semantic_draft_extracts_conservative_grouped_strokes() -> None:
     assert draft["candidates"][0]["sourceIds"] == ["stroke-a", "stroke-b"]
 
 
+def test_semantic_draft_extracts_portal_endpoint_and_pair_candidates() -> None:
+    client = TestClient(app)
+    projected = projection()
+    projected["strokes"] = []
+    projected["shapes"] = [
+        {"id": "portal-a", "sourceId": "portal-a", "kind": "ellipse", "x": 180, "y": 420, "w": 92, "h": 104},
+        {"id": "portal-b", "sourceId": "portal-b", "kind": "ellipse", "x": 1480, "y": 680, "w": 96, "h": 88},
+    ]
+
+    response = client.post(
+        "/rooms/portals/capture",
+        json={"type": "canvas_capture", "capture": {"ok": True}, "projection": projected},
+    )
+
+    assert response.status_code == 200
+    draft = response.json()["semanticDraft"]
+    extractors = [candidate["extractor"] for candidate in draft["candidates"]]
+    assert extractors == ["circle", "circle", "portal_pair"]
+    pair = draft["candidates"][2]
+    assert pair["semanticType"] == "portal_pair"
+    assert pair["sourceIds"] == ["portal-a", "portal-b"]
+    assert len(pair["portalEndpoints"]) == 2
+
+
 def test_semantic_answer_binds_to_current_candidate_and_confirms_behavior() -> None:
     client = TestClient(app)
     projected = projection()

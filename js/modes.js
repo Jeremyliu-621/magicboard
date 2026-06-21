@@ -480,6 +480,7 @@
         name: name || 'Custom Level',
         bounds: { x0: 0, y0: 0, x1: DS.VIEW.w, y1: DS.VIEW.h },
         platforms: [],
+        portals: [],
         spawns: [{ x: 660, y: 780 }, { x: 1260, y: 780 }],
         bg: [],
         decor: [],
@@ -489,6 +490,7 @@
       draft = draft && typeof draft === 'object' ? draft : {};
       const st = this.emptyStage(name);
       if (Array.isArray(draft.platforms)) st.platforms = DS.data.clone(draft.platforms);
+      if (Array.isArray(draft.portals)) st.portals = DS.data.clone(draft.portals);
       if (Array.isArray(draft.spawns) && draft.spawns.length) st.spawns = DS.data.clone(draft.spawns);
       return st;
     },

@@ -18,6 +18,10 @@ function loadFacade() {
           source: { kind: 'magicboard_agent', candidateId: 'old-generated' },
         },
       ],
+      portals: [
+        { id: 'old-a', link: 'old-b', x: 420, y: 500, r: 42, col: '#2f6fe0', source: { kind: 'magicboard_agent', candidateId: 'old-portal' } },
+        { id: 'old-b', link: 'old-a', x: 1420, y: 500, r: 42, col: '#2f6fe0', source: { kind: 'magicboard_agent', candidateId: 'old-portal' } },
+      ],
       spawns: [],
     },
   }
@@ -44,6 +48,19 @@ function loadFacade() {
   const source = fs.readFileSync(new URL('../js/magicBoardGame.js', import.meta.url), 'utf8')
   vm.runInContext(source, context)
   return { api: window.MagicBoardGame, data, saves }
+}
+
+function confirmedPortalPairCandidate(overrides = {}) {
+  return confirmedCandidate({
+    candidateId: 'portal-candidate',
+    geometryHash: 'portal-hash',
+    sourceIds: ['portal-a', 'portal-b'],
+    semanticType: 'portal_pair',
+    geometry: { x: 180, y: 420, w: 1300, h: 360 },
+    portalEndpoints: [{ x: 220, y: 460, r: 46 }, { x: 1500, y: 720, r: 44 }],
+    answer: { role: 'portal_pair', behavior: 'portal_pair' },
+    ...overrides,
+  })
 }
 
 function confirmedCandidate(overrides = {}) {
@@ -166,6 +183,26 @@ function confirmedCandidate(overrides = {}) {
   assert.equal(data.stage.platforms.some((platform) => platform.source?.candidateId === 'old-generated' && platform.x === 100), false)
   assert.equal(data.stage.platforms.some((platform) => platform.source?.candidateId === 'candidate-new'), true)
   assert.equal(data.stage.platforms.some((platform) => platform.source?.candidateId === 'old-generated' && platform.kind === 'crystal'), true)
+}
+
+{
+  const { api, data, saves } = loadFacade()
+  const patch = api.buildPatchFromSemanticDraft(
+    { roomId: 'room-1', worldId: 'world-1', captureVersion: 4, candidates: [confirmedPortalPairCandidate({ candidateId: 'old-portal' })] },
+    { mapId: 'meadow' },
+  )
+
+  assert.equal(patch.operations.length, 1)
+  assert.equal(patch.operations[0].type, 'add_portal_pair')
+  const result = api.applyPatch(patch)
+
+  assert.equal(result.ok, true)
+  assert.equal(saves.length, 1)
+  assert.equal(data.stage.portals.length, 2)
+  assert.equal(data.stage.portals[0].link, data.stage.portals[1].id)
+  assert.equal(data.stage.portals[1].link, data.stage.portals[0].id)
+  assert.equal(data.stage.portals.some((portal) => portal.id === 'old-a'), false)
+  assert.equal(data.stage.portals.every((portal) => portal.source?.candidateId === 'old-portal'), true)
 }
 
 console.log('MagicBoardGame facade tests passed')

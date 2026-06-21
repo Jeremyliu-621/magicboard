@@ -27,6 +27,13 @@ from .semantic import bind_answer, build_semantic_draft
 MAX_RECENT_EVENTS = 20
 
 
+def selection_payload(selection: RoomSelectionResponse) -> dict[str, Any]:
+    payload = selection.model_dump(mode="json", by_alias=True)
+    if payload.get("stageReference") is None:
+        payload.pop("stageReference", None)
+    return payload
+
+
 @dataclass
 class RoomState:
     room_id: str
@@ -72,6 +79,7 @@ class RoomRegistry:
         room_id: str,
         world_id: str | None = None,
         world_name: str | None = None,
+        stage_reference: dict[str, Any] | None = None,
     ) -> RoomSelectionResponse:
         self.get_room(room_id)
         self.get_room(room_id).world_id = world_id
@@ -79,6 +87,7 @@ class RoomRegistry:
             roomId=room_id,
             worldId=world_id,
             worldName=world_name,
+            stageReference=stage_reference,
             selectedAt=datetime.now(UTC),
         )
         return self._selection
@@ -100,7 +109,7 @@ class RoomRegistry:
         stale: list[WebSocket] = []
         payload = {
             "type": "selection_updated",
-            **self._selection.model_dump(mode="json", by_alias=True),
+            **selection_payload(self._selection),
         }
         for websocket in list(self._selection_connections):
             try:
