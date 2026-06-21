@@ -101,7 +101,7 @@
           if (this.falEndpoint) this._falEnhanceInto(prop, b64, prop.label);   // fast first pass
           if (this.endpoint) this._enhanceInto(prop, b64, prop.label);          // polished pass (wins)
         }
-        if (this.chloeEndpoint && !isElement(prop.label)) this._mechanicInto(prop, prop.label, opts.description);
+        if (this.chloeEndpoint && !isFixedMechanic(prop.label)) this._mechanicInto(prop, prop.label, opts.description);
       }
       return prop;
     },
@@ -125,7 +125,7 @@
       const b64 = stripDataUrl(dataUrl);
       if (this.falEndpoint) this._falEnhanceInto(prop, b64, prop.label);   // fast first pass
       if (this.endpoint) this._enhanceInto(prop, b64, prop.label);          // polished pass (wins)
-      if (this.chloeEndpoint && !isElement(prop.label)) this._mechanicInto(prop, prop.label, opts.description);
+      if (this.chloeEndpoint && !isFixedMechanic(prop.label)) this._mechanicInto(prop, prop.label, opts.description);
       return prop;
     },
 
@@ -406,7 +406,7 @@
         if (this.falEndpoint) this._falEnhanceInto(prop, b64, label);   // fast first pass
         if (this.endpoint) this._enhanceInto(prop, b64, label);          // polished pass (wins)
       }
-      if (this.chloeEndpoint && !isElement(label)) this._mechanicInto(prop, label, desc);
+      if (this.chloeEndpoint && !isFixedMechanic(label)) this._mechanicInto(prop, label, desc);
     },
 
     // --- dev/testing: spawn a prop with a generated placeholder shape, no iPad needed ---
@@ -452,7 +452,16 @@
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
   // a pure element label (fire/water/ice/...) keeps its deterministic clashing projectile weapon —
   // we DON'T let CHLOE re-compose it into a beam/grenade, so fire-vs-water reliably fizzles.
-  function isElement(label) { return !!(DS.Mechanics && DS.Mechanics.elementOf && DS.Mechanics.elementOf(label)); }
+  // labels whose DETERMINISTIC mechanic is reliable and CHLOE tends to muddle: elements (clashing
+  // projectiles) + heal/buff/bouncy/platform (consumables / placed items). These SKIP CHLOE so they
+  // always behave — CHLOE was giving 'star' a no-op 'speed' buff and 'spring' a push gun. Weapons
+  // (sword/gun/bomb/...) still go to CHLOE, which composes interesting moves for them.
+  function isFixedMechanic(label) {
+    const M = DS.Mechanics; if (!M) return false;
+    if (M.elementOf && M.elementOf(label)) return true;
+    const a = M.archetypeFor && M.archetypeFor(label);
+    return a === 'heal' || a === 'buff' || a === 'bouncy' || a === 'platform';
+  }
 
   // CHLOE spec {node, params, name, flavor} -> a DS.Prop.fire() mechanic cfg (same shape as
   // DS.Mechanics.DEFAULTS). The spec is already CLAMPED server-side by config.clamp_spec(); this

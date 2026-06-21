@@ -111,11 +111,13 @@
       if (world.effects) world.effects.dust(f.x + f.facing * 40, f.y, f.facing);
     } else if (m.kind === 'heal') {
       f.damage = Math.max(0, (f.damage || 0) - (m.amount || 25));
-      if (world.effects) world.effects.charge(f.x, f.y - 6, f.tagCol);
+      if (world.effects) { world.effects.charge(f.x, f.y - 6, '#5ec46a'); if (world.effects.floatText) world.effects.floatText(f.x, f.y - this.h - 18, 'HEAL'); }
       this._consume(f);
     } else if (m.kind === 'buff') {
-      if (m.effect === 'invuln') f.invuln = Math.max(f.invuln || 0, m.dur || 5);
-      if (world.effects) world.effects.charge(f.x, f.y - 6, f.tagCol);
+      // default buff is INVULN (visible flashing); 'speed'/'power' aren't read by the engine, so fall
+      // back to invuln so a drawn star always does something obvious.
+      f.invuln = Math.max(f.invuln || 0, m.dur || 5);
+      if (world.effects) { world.effects.charge(f.x, f.y - 6, f.tagCol); if (world.effects.floatText) world.effects.floatText(f.x, f.y - this.h - 18, 'STAR!'); }
       this._consume(f);
     } else if (world.spawnProjectile) {
       // fallback: lob it like a throwable
@@ -199,6 +201,8 @@
           if (DS.Graph && DS.Graph.isGraph(p.mechanic) && p.mechanic.on && p.mechanic.on.pickup) {
             DS.Graph.run(p.mechanic, 'pickup', { world: game.world, holder: f, x: f.x, y: f.y, facing: f.facing });
             if (!p.mechanic.on.fire) { f.heldProp = null; p.held = null; p.dead = true; }
+          } else if (p.mechanic && (p.mechanic.kind === 'heal' || p.mechanic.kind === 'buff')) {
+            p.fire(game.world, 0);   // a drawn fruit/star is a CONSUMABLE — apply it the instant you grab it
           }
           break;
         }

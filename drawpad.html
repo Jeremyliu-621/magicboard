@@ -79,7 +79,9 @@
   function sendDraw(strokes, x, y){ if(ws && ws.readyState===1 && alive) ws.send(JSON.stringify({ t:'draw', strokes:strokes, x:x, y:y, label:(chosen&&chosen.l)||undefined })); }
 
   // ---------- category palette: a FIXED label = reliable mechanic + sprite (bypasses misclassification) ----------
-  var CATS=[{e:'🗡️',n:'Sword',l:'sword'},{e:'🔫',n:'Gun',l:'gun'},{e:'🔥',n:'Fire',l:'fire'},{e:'❄️',n:'Ice',l:'ice'},
+  var CATS=[{e:'🗡️',n:'Sword',l:'sword'},{e:'🔫',n:'Gun',l:'gun'},
+    {e:'🔥',n:'Fire',l:'fire'},{e:'💧',n:'Water',l:'water'},{e:'❄️',n:'Ice',l:'ice'},
+    {e:'⚡',n:'Bolt',l:'lightning'},{e:'🌿',n:'Plant',l:'plant'},{e:'☠️',n:'Poison',l:'poison'},
     {e:'💣',n:'Bomb',l:'bomb'},{e:'🦘',n:'Bouncy',l:'spring'},{e:'🍎',n:'Heal',l:'fruit'},{e:'⭐',n:'Star',l:'star'}];
   var chosen=null;   // null = no pick = let the AI guess (the default behaviour). Tap a chip to force it.
   var paletteEl=document.getElementById('palette'), drawhint=document.getElementById('drawhint');
