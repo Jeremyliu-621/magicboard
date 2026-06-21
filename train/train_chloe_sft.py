@@ -172,7 +172,7 @@ def main() -> None:
         gradient_checkpointing=True,
         warmup_steps=args.warmup_steps,
         logging_steps=args.logging_steps,
-        max_seq_length=args.max_seq_len,
+        max_length=args.max_seq_len,  # trl 0.24 renamed max_seq_length -> max_length
         packing=False,  # one chat row == one example; do not pack across descriptions
         bf16=True,
         save_steps=args.max_steps,  # one save at the end -> --output_dir
@@ -185,7 +185,7 @@ def main() -> None:
           f"seq_len={args.max_seq_len}")
     trainer = NeuronSFTTrainer(
         model=args.model,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,  # trl 0.24 renamed the `tokenizer` arg -> `processing_class`
         train_dataset=dataset,
         peft_config=lora_config,
         formatting_func=format_row,
