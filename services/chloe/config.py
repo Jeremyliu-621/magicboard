@@ -11,7 +11,7 @@ ranges here at serve time, so a hallucinated/garbage number can never break the 
 """
 
 # ---- the model CHLOE fine-tunes (small instruct LLM: Trainium SFT-LoRA + fast inference) ----
-BASE_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"   # fallback: meta-llama/Llama-3.2-1B-Instruct
+BASE_MODEL = "Qwen/Qwen3-0.6B"   # Neuron TRAINING supports only llama/granite/qwen3 (NOT qwen2); Qwen3 is open + tiny
 
 # ---- the bounded node library: node -> {param: (type, min, max, default)} ----
 # (enum params use ("enum", [choices...], default).) A spec fills exactly one node's params.
