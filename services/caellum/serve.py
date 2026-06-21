@@ -187,6 +187,26 @@ def _encode_png_b64(pil_img) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
+def _cutout_bg(rgb_img):
+    """Make the solid background transparent by keying out the corner colour -> clean RGBA sprite.
+
+    The prompt forces a flat solid background, so we sample the four corners (which ARE background)
+    and turn every pixel close to that colour transparent. Deterministic, fast, no model download —
+    and unlike rembg it never leaves a grey box around the asset.
+    """
+    import numpy as np
+    from PIL import Image
+
+    rgba = np.array(rgb_img.convert("RGBA"))
+    rgb = rgba[:, :, :3].astype(np.int16)
+    h, w = rgb.shape[:2]
+    corners = np.stack([rgb[0, 0], rgb[0, w - 1], rgb[h - 1, 0], rgb[h - 1, w - 1]])
+    bg = np.median(corners, axis=0)
+    dist = np.abs(rgb - bg).sum(axis=2)          # L1 distance to the background colour
+    rgba[:, :, 3] = np.where(dist < 72, 0, 255).astype(np.uint8)
+    return Image.fromarray(rgba, "RGBA")
+
+
 # --------------------------------------------------------------------------------------
 # Core enhance — framework-agnostic so a future Redis Streams consumer can call it directly.
 # --------------------------------------------------------------------------------------
@@ -243,12 +263,10 @@ def enhance_bytes(
     )
     raster = result.images[0]
 
-    # 4) background removal -> transparent RGBA sprite (spec: from rembg import remove)
-    from rembg import remove
-
-    sprite = remove(raster.convert("RGB"))
-    if sprite.mode != "RGBA":
-        sprite = sprite.convert("RGBA")
+    # 4) cut the (plain) background to transparent -> clean RGBA sprite. The prompt forces a solid
+    #    background, so we key out the corner colour rather than rely on rembg (which left a grey box
+    #    and needed a 170MB model download on first use).
+    sprite = _cutout_bg(raster.convert("RGB"))
 
     sprite_b64 = _encode_png_b64(sprite)
     ms = int((time.time() - t0) * 1000)

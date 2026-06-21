@@ -33,12 +33,14 @@ STRENGTH = 0.6              # img2img denoise: high enough to ADD detail (handle
 CONTROLNET_SCALE = 0.6     # how tightly to follow the drawn lines
 STEPS = 20                 # ~2-3s budget. (LCM variant => 8 steps; turbo => 1, lower quality)
 GUIDANCE = 6.0
-NEG_PROMPT = "photograph, 3d render, realistic, blurry, color noise, jpeg artifacts, watermark, text, signature"
+NEG_PROMPT = ("realistic, photo, photograph, 3d, render, detailed, shading, gradient, texture, "
+              "noise, busy background, scenery, shadow, reflection, blurry, watermark, text, signature")
 
 def prompt_for(label: str) -> str:
     """Build the positive prompt from the semantic hint (typed/voice label)."""
-    return (f"a clean 2d game asset of a {label}, bold black outline, flat shading, "
-            f"centered, simple bold shapes, crisp lines, white background, sticker, icon")
+    return (f"a simple flat cartoon doodle icon of a {label}, thick bold black outline, minimal, "
+            f"hand-drawn sticker, flat solid colors, no shading, single object centered on a plain "
+            f"solid white background")
 
 # ---- item / object taxonomy (mirror the flat CATEGORIES list in data/ + train/ Colab scripts) ----
 # CATEGORY_BEHAVIOR is the single source of truth for BOTH halves of the pipeline:
