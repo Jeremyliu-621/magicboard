@@ -5,6 +5,12 @@ import vm from 'node:vm'
 function loadFacade() {
   const saves = []
   const data = {
+    characters: {
+      Sprout: { name: 'Sprout' },
+      Acorn: { name: 'Acorn' },
+      Maple: { name: 'Maple' },
+    },
+    roster: ['Sprout', 'Acorn'],
     stage: {
       platforms: [
         { x: 0, y: 900, w: 500, h: 40, kind: 'ground', pass: false },
@@ -203,6 +209,47 @@ function confirmedCandidate(overrides = {}) {
   assert.equal(data.stage.portals[1].link, data.stage.portals[0].id)
   assert.equal(data.stage.portals.some((portal) => portal.id === 'old-a'), false)
   assert.equal(data.stage.portals.every((portal) => portal.source?.candidateId === 'old-portal'), true)
+}
+
+{
+  const { api, data } = loadFacade()
+  const launchBefore = api.validateLaunchReady('meadow')
+  assert.equal(launchBefore.ok, false)
+  assert.deepEqual(JSON.parse(JSON.stringify(launchBefore.missing)), ['two spawns'])
+
+  const result = api.applyPatch({
+    type: 'magicboard_world_patch',
+    version: 1,
+    target: { mapId: 'meadow' },
+    operations: [
+      { type: 'set_spawns', spawns: [{ x: 300, y: 760 }, { x: 500, y: 760 }] },
+      { type: 'set_roster', roster: ['Sprout', 'Maple'] },
+    ],
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(result.launch.ok, true)
+  assert.deepEqual(JSON.parse(JSON.stringify(data.roster)), ['Sprout', 'Maple'])
+  assert.deepEqual(JSON.parse(JSON.stringify(data.stage.spawns)), [{ x: 300, y: 760 }, { x: 500, y: 760 }])
+}
+
+{
+  const { api, data } = loadFacade()
+  const result = api.applyPatch({
+    type: 'magicboard_world_patch',
+    version: 1,
+    target: { mapId: 'meadow' },
+    operations: [
+      { type: 'update_platform', candidateId: 'old-generated', patch: { kind: 'crystal', x: 130, y: 710, w: 240, h: 34 } },
+      { type: 'remove_generated', candidateIds: ['old-portal'] },
+    ],
+  })
+
+  assert.equal(result.ok, true)
+  const updated = data.stage.platforms.find((platform) => platform.source?.candidateId === 'old-generated')
+  assert.equal(updated.kind, 'crystal')
+  assert.equal(updated.x, 130)
+  assert.equal(data.stage.portals.length, 0)
 }
 
 console.log('MagicBoardGame facade tests passed')

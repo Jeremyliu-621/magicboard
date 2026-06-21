@@ -2,15 +2,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+import hashlib
 from typing import Any
 
 from fastapi import WebSocket
 
 from .schemas import (
+    AgentError,
     AgentJobRequest,
     AgentJobResponse,
+    AgentTurn,
     CanvasCaptureMessage,
     ClarificationAnswerMessage,
+    LevelEditProposal,
+    PermissionRequest,
     ProjectionUpdatedMessage,
     RecentEvent,
     RoomCaptureResponse,
@@ -18,6 +23,9 @@ from .schemas import (
     SemanticAnswer,
     SemanticDraft,
     SemanticDraftUpdatedMessage,
+    VoiceRoomStateUpdatedMessage,
+    VoiceSession,
+    VoiceTranscriptEvent,
     VisualObservation,
     VisualObservationUpdatedMessage,
 )
@@ -44,6 +52,14 @@ class RoomState:
     visual_observation: VisualObservation | None = None
     semantic_answers: list[SemanticAnswer] = field(default_factory=list)
     agent_jobs: dict[str, AgentJobResponse] = field(default_factory=dict)
+    voice_sessions: dict[str, VoiceSession] = field(default_factory=dict)
+    voice_events: list[VoiceTranscriptEvent] = field(default_factory=list)
+    agent_turns: list[AgentTurn] = field(default_factory=list)
+    semantic_objects: list[dict[str, Any]] = field(default_factory=list)
+    proposals: dict[str, LevelEditProposal] = field(default_factory=dict)
+    permission_requests: dict[str, PermissionRequest] = field(default_factory=dict)
+    stage_reference: dict[str, Any] | None = None
+    stage_reference_version: int = 0
     world_id: str | None = None
     updated_at: datetime | None = None
     recent_events: list[RecentEvent] = field(default_factory=list)
@@ -70,6 +86,14 @@ class RoomRegistry:
             projection=room.projection,
             semanticDraft=room.semantic_draft,
             visualObservation=room.visual_observation,
+            voiceSessions=list(room.voice_sessions.values()),
+            voiceEvents=room.voice_events[-20:],
+            agentTurns=room.agent_turns[-10:],
+            proposals=list(room.proposals.values()),
+            permissionRequests=list(room.permission_requests.values()),
+            semanticObjects=room.semantic_objects,
+            stageReference=room.stage_reference,
+            stageReferenceVersion=room.stage_reference_version,
             updatedAt=room.updated_at,
             recentEvents=list(room.recent_events),
         )
@@ -80,14 +104,22 @@ class RoomRegistry:
         world_id: str | None = None,
         world_name: str | None = None,
         stage_reference: dict[str, Any] | None = None,
+        stage_reference_version: int | None = None,
     ) -> RoomSelectionResponse:
-        self.get_room(room_id)
-        self.get_room(room_id).world_id = world_id
+        room = self.get_room(room_id)
+        room.world_id = world_id
+        if stage_reference is not None:
+            room.stage_reference = stage_reference
+            room.stage_reference_version = (
+                stage_reference_version if isinstance(stage_reference_version, int) and stage_reference_version > 0
+                else room.stage_reference_version + 1
+            )
         self._selection = RoomSelectionResponse(
             roomId=room_id,
             worldId=world_id,
             worldName=world_name,
-            stageReference=stage_reference,
+            stageReference=stage_reference or room.stage_reference,
+            stageReferenceVersion=room.stage_reference_version,
             selectedAt=datetime.now(UTC),
         )
         return self._selection
@@ -168,6 +200,9 @@ class RoomRegistry:
             projection=message.projection,
             semanticDraft=room.semantic_draft,
             visualObservation=room.visual_observation,
+            voiceSessions=list(room.voice_sessions.values()),
+            proposals=list(room.proposals.values()),
+            permissionRequests=list(room.permission_requests.values()),
             sourceClientId=message.client_id,
         )
 
@@ -176,6 +211,150 @@ class RoomRegistry:
 
     def visual_observation(self, room_id: str) -> VisualObservation | None:
         return self.get_room(room_id).visual_observation
+
+    def _stable_id(self, prefix: str, *parts: object) -> str:
+        raw = "|".join(str(part) for part in parts) + "|" + datetime.now(UTC).isoformat()
+        return prefix + "-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+
+    def voice_room_update(self, room_id: str) -> VoiceRoomStateUpdatedMessage:
+        room = self.get_room(room_id)
+        return VoiceRoomStateUpdatedMessage(
+            roomId=room.room_id,
+            version=room.version,
+            voiceSessions=list(room.voice_sessions.values()),
+            voiceEvents=room.voice_events[-20:],
+            agentTurns=room.agent_turns[-10:],
+            proposals=list(room.proposals.values()),
+            permissionRequests=list(room.permission_requests.values()),
+        )
+
+    def active_voice_sessions(self, room_id: str) -> list[VoiceSession]:
+        room = self.get_room(room_id)
+        return [session for session in room.voice_sessions.values() if session.status not in {"ended", "error"}]
+
+    def create_voice_session(
+        self,
+        room_id: str,
+        *,
+        client_id: str | None = None,
+        world_id: str | None = None,
+        end_other_active: bool = False,
+    ) -> VoiceSession:
+        room = self.get_room(room_id)
+        now = datetime.now(UTC)
+        if end_other_active:
+            for session in self.active_voice_sessions(room_id):
+                room.voice_sessions[session.session_id] = session.model_copy(
+                    update={"status": "ended", "ended_at": now, "updated_at": now}
+                )
+        session = VoiceSession(
+            sessionId=self._stable_id("voice", room_id, client_id or ""),
+            roomId=room_id,
+            worldId=world_id or room.world_id,
+            status="starting",
+            createdAt=now,
+            updatedAt=now,
+            captureVersion=room.version,
+            semanticDraftVersion=room.semantic_draft.version if room.semantic_draft else 0,
+            stageReferenceVersion=room.stage_reference_version,
+            clientId=client_id,
+            permissions=[],
+        )
+        room.voice_sessions[session.session_id] = session
+        return session
+
+    def get_voice_session(self, room_id: str, session_id: str) -> VoiceSession | None:
+        return self.get_room(room_id).voice_sessions.get(session_id)
+
+    def update_voice_session(
+        self,
+        room_id: str,
+        session_id: str,
+        *,
+        status: str | None = None,
+        error: AgentError | None = None,
+        ended: bool = False,
+    ) -> VoiceSession | None:
+        room = self.get_room(room_id)
+        session = room.voice_sessions.get(session_id)
+        if session is None:
+            return None
+        now = datetime.now(UTC)
+        update: dict[str, Any] = {"updated_at": now}
+        if status is not None:
+            update["status"] = status
+        if error is not None:
+            update["error"] = error
+        if ended:
+            update["status"] = "ended" if error is None else "error"
+            update["ended_at"] = now
+        session = session.model_copy(update=update)
+        room.voice_sessions[session_id] = session
+        return session
+
+    def append_voice_event(self, room_id: str, event: VoiceTranscriptEvent) -> VoiceTranscriptEvent:
+        room = self.get_room(room_id)
+        room.voice_events.append(event)
+        room.voice_events = room.voice_events[-100:]
+        return event
+
+    def voice_events_for_session(self, room_id: str, session_id: str | None = None) -> list[VoiceTranscriptEvent]:
+        events = self.get_room(room_id).voice_events
+        if session_id:
+            return [event for event in events if event.session_id == session_id]
+        return list(events)
+
+    def upsert_agent_turn(self, room_id: str, turn: AgentTurn) -> AgentTurn:
+        room = self.get_room(room_id)
+        room.agent_turns = [existing for existing in room.agent_turns if existing.turn_id != turn.turn_id]
+        room.agent_turns.append(turn)
+        room.agent_turns = room.agent_turns[-50:]
+        return turn
+
+    def store_proposal(self, room_id: str, proposal: LevelEditProposal) -> LevelEditProposal:
+        room = self.get_room(room_id)
+        room.proposals[proposal.proposal_id] = proposal
+        return proposal
+
+    def get_proposal(self, room_id: str, proposal_id: str) -> LevelEditProposal | None:
+        return self.get_room(room_id).proposals.get(proposal_id)
+
+    def resolve_proposal(self, room_id: str, proposal_id: str, approved: bool) -> LevelEditProposal | None:
+        room = self.get_room(room_id)
+        proposal = room.proposals.get(proposal_id)
+        if proposal is None:
+            return None
+        now = datetime.now(UTC)
+        proposal = proposal.model_copy(
+            update={"approval_state": "approved" if approved else "rejected", "updated_at": now}
+        )
+        room.proposals[proposal_id] = proposal
+        return proposal
+
+    def mark_proposal_applied(self, room_id: str, proposal_id: str) -> LevelEditProposal | None:
+        room = self.get_room(room_id)
+        proposal = room.proposals.get(proposal_id)
+        if proposal is None:
+            return None
+        proposal = proposal.model_copy(update={"approval_state": "applied", "updated_at": datetime.now(UTC)})
+        room.proposals[proposal_id] = proposal
+        return proposal
+
+    def store_permission_request(self, room_id: str, request: PermissionRequest) -> PermissionRequest:
+        room = self.get_room(room_id)
+        room.permission_requests[request.permission_request_id] = request
+        return request
+
+    def resolve_permission_request(self, room_id: str, permission_request_id: str, approved: bool) -> PermissionRequest | None:
+        room = self.get_room(room_id)
+        request = room.permission_requests.get(permission_request_id)
+        if request is None:
+            return None
+        request = request.model_copy(
+            update={"status": "approved" if approved else "denied", "updated_at": datetime.now(UTC)}
+        )
+        room.permission_requests[permission_request_id] = request
+        return request
 
     def enqueue_agent_job(self, room_id: str, request: AgentJobRequest) -> AgentJobResponse:
         room = self.get_room(room_id)
@@ -275,6 +454,17 @@ class RoomRegistry:
     async def broadcast_visual(self, room_id: str, update: VisualObservationUpdatedMessage) -> None:
         stale: list[WebSocket] = []
         payload = update.model_dump(mode="json", by_alias=True)
+        for websocket in list(self._connections.get(room_id, set())):
+            try:
+                await websocket.send_json(payload)
+            except Exception:
+                stale.append(websocket)
+        for websocket in stale:
+            self.disconnect(room_id, websocket)
+
+    async def broadcast_voice_state(self, room_id: str) -> None:
+        stale: list[WebSocket] = []
+        payload = self.voice_room_update(room_id).model_dump(mode="json", by_alias=True)
         for websocket in list(self._connections.get(room_id, set())):
             try:
                 await websocket.send_json(payload)

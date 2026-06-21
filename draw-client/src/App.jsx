@@ -92,6 +92,31 @@ function visualObservationUrlForRoom(backendUrl, roomId) {
   return url.toString()
 }
 
+function voiceSessionsUrlForRoom(backendUrl, roomId) {
+  const url = new URL(backendUrl)
+  url.pathname = `/rooms/${encodeURIComponent(roomId)}/voice/sessions`
+  url.search = ''
+  url.hash = ''
+  return url.toString()
+}
+
+function voiceSessionUrlForRoom(backendUrl, roomId, sessionId) {
+  const url = new URL(backendUrl)
+  url.pathname = `/rooms/${encodeURIComponent(roomId)}/voice/sessions/${encodeURIComponent(sessionId)}`
+  url.search = ''
+  url.hash = ''
+  return url.toString()
+}
+
+function voiceWsUrlForRoom(backendUrl, roomId, sessionId) {
+  const url = new URL(backendUrl)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  url.pathname = `/ws/rooms/${encodeURIComponent(roomId)}/voice/${encodeURIComponent(sessionId)}`
+  url.search = ''
+  url.hash = ''
+  return url.toString()
+}
+
 function selectionWsUrlForBackend(backendUrl) {
   const url = new URL(backendUrl)
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -494,6 +519,41 @@ function VisualObservationPanel({ observation }) {
   )
 }
 
+function VoicePanel({
+  voiceStatus,
+  voiceEvents,
+  agentTurns,
+  proposals,
+  permissionRequests,
+  isRecording,
+  onToggleMic,
+}) {
+  const latestTranscript = [...voiceEvents].reverse().find((event) => event.type === 'final' || event.type === 'partial')
+  const assistant = [...voiceEvents].reverse().find((event) => event.type === 'assistant_text')
+  const proposal = [...proposals].reverse().find((item) => item.approvalState === 'pending_approval' || item.approvalState === 'approved') || proposals[proposals.length - 1]
+  const permission = permissionRequests.find((item) => item.status === 'pending') || permissionRequests[permissionRequests.length - 1]
+  const turn = agentTurns[agentTurns.length - 1]
+
+  return (
+    <section className="voice-panel" aria-label="Voice agent">
+      <button className={`voice-mic ${isRecording ? 'recording' : ''}`} type="button" onClick={onToggleMic}>
+        {isRecording ? 'Stop' : 'Mic'}
+      </button>
+      <div className="voice-sheet">
+        <div className="voice-row">
+          <strong>{voiceStatus || 'voice idle'}</strong>
+          <span>{turn ? turn.status : 'no job'}</span>
+        </div>
+        <p>{latestTranscript?.transcript || assistant?.transcript || 'Transcript will appear here.'}</p>
+        <div className="voice-chips">
+          <span>{proposal ? `proposal · ${proposal.approvalState}` : 'no proposal'}</span>
+          <span>{permission ? permission.status : 'no permission'}</span>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 export default function App() {
   const backendUrl = useMemo(
     () => normalizeBackendUrl(getBackendUrl()),
@@ -511,6 +571,7 @@ export default function App() {
       capture: captureUrlForRoom(backendUrl, roomId),
       clarifications: clarificationUrlForRoom(backendUrl, roomId),
       visualObservation: visualObservationUrlForRoom(backendUrl, roomId),
+      voiceSessions: voiceSessionsUrlForRoom(backendUrl, roomId),
       websocket: websocketUrlForRoom(backendUrl, roomId),
     } : null),
     [backendUrl, roomId],
@@ -518,6 +579,9 @@ export default function App() {
 
   const editorRef = useRef(null)
   const socketRef = useRef(null)
+  const voiceSocketRef = useRef(null)
+  const mediaRecorderRef = useRef(null)
+  const micStreamRef = useRef(null)
   const reconnectTimerRef = useRef(null)
   const sendTimerRef = useRef(null)
   const cleanupStoreListenerRef = useRef(null)
@@ -539,6 +603,13 @@ export default function App() {
   const [visualObservation, setVisualObservation] = useState(null)
   const [selectedCandidateId, setSelectedCandidateId] = useState(null)
   const [semanticError, setSemanticError] = useState('')
+  const [voiceSession, setVoiceSession] = useState(null)
+  const [voiceEvents, setVoiceEvents] = useState([])
+  const [agentTurns, setAgentTurns] = useState([])
+  const [proposals, setProposals] = useState([])
+  const [permissionRequests, setPermissionRequests] = useState([])
+  const [voiceStatus, setVoiceStatus] = useState('voice idle')
+  const [isRecording, setIsRecording] = useState(false)
   const [error, setError] = useState('')
   const [selectionStatus, setSelectionStatus] = useState(explicitRoom ? 'url room' : 'waiting')
   const tldrawComponents = useMemo(
@@ -663,10 +734,35 @@ export default function App() {
     setVisualObservation(null)
     setSelectedCandidateId(null)
     setSemanticError('')
+    setVoiceSession(null)
+    setVoiceEvents([])
+    setAgentTurns([])
+    setProposals([])
+    setPermissionRequests([])
+    setVoiceStatus('voice idle')
+    setIsRecording(false)
     localHadUserContentRef.current = false
     userInteractedRef.current = false
     previousSourceIdsRef.current = new Set()
   }, [roomId])
+
+  const applyVoiceState = useCallback((message) => {
+    if (Array.isArray(message.voiceSessions)) {
+      setVoiceSession((current) => message.voiceSessions.find((session) => session.sessionId === current?.sessionId) || message.voiceSessions.find((session) => session.status !== 'ended') || current)
+      const active = message.voiceSessions.find((session) => session.status !== 'ended')
+      if (active) setVoiceStatus(`voice ${active.status}`)
+    }
+    if (Array.isArray(message.voiceEvents)) {
+      setVoiceEvents((current) => {
+        const byId = new Map(current.map((event) => [event.eventId, event]))
+        message.voiceEvents.forEach((event) => byId.set(event.eventId, event))
+        return Array.from(byId.values()).slice(-40)
+      })
+    }
+    if (Array.isArray(message.agentTurns)) setAgentTurns(message.agentTurns)
+    if (Array.isArray(message.proposals)) setProposals(message.proposals)
+    if (Array.isArray(message.permissionRequests)) setPermissionRequests(message.permissionRequests)
+  }, [])
 
   const activePendingCandidate = useMemo(() => {
     const candidates = semanticDraft?.candidates || []
@@ -799,12 +895,14 @@ export default function App() {
         setRoomVersion(message.version ?? 0)
         setSemanticDraft(message.semanticDraft || null)
         setVisualObservation(message.visualObservation || null)
+        applyVoiceState(message)
       } else if (message.type === 'projection_updated') {
         setStatus('connected')
         setRoomVersion(message.version ?? 0)
         setLastSyncedAt(message.updatedAt || new Date().toISOString())
         setSemanticDraft(message.semanticDraft || null)
         setVisualObservation(message.visualObservation || null)
+        applyVoiceState(message)
       } else if (message.type === 'semantic_draft_updated') {
         setStatus('connected')
         setRoomVersion(message.version ?? 0)
@@ -814,6 +912,8 @@ export default function App() {
         setRoomVersion(message.version ?? 0)
         setVisualObservation(message.visualObservation || null)
         if (message.semanticDraft) setSemanticDraft(message.semanticDraft)
+      } else if (message.type === 'voice_room_state_updated') {
+        applyVoiceState(message)
       } else if (message.type === 'error') {
         setError(message.message || 'Backend rejected a message.')
         setSemanticError(message.message || 'Backend rejected a message.')
@@ -832,7 +932,79 @@ export default function App() {
       if (socketRef.current !== socket || mountIdRef.current !== mountId) return
       setStatus('error')
     })
-  }, [sendCaptureNow, urls])
+  }, [applyVoiceState, sendCaptureNow, urls])
+
+  const stopVoice = useCallback(async (sendStop = true) => {
+    if (sendStop && voiceSocketRef.current?.readyState === WebSocket.OPEN) {
+      voiceSocketRef.current.send(JSON.stringify({ type: 'stop' }))
+    }
+    if (mediaRecorderRef.current) {
+      try { mediaRecorderRef.current.stop() } catch (_error) {}
+      mediaRecorderRef.current = null
+    }
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach((track) => track.stop())
+      micStreamRef.current = null
+    }
+    if (voiceSocketRef.current) {
+      const socket = voiceSocketRef.current
+      voiceSocketRef.current = null
+      try { socket.close() } catch (_error) {}
+    }
+    if (voiceSession?.sessionId && urls) {
+      fetch(voiceSessionUrlForRoom(backendUrl, roomId, voiceSession.sessionId), { method: 'DELETE' }).catch(() => {})
+    }
+    setIsRecording(false)
+    setVoiceStatus('voice idle')
+  }, [backendUrl, roomId, urls, voiceSession])
+
+  const startVoice = useCallback(async () => {
+    if (!urls || isRecording) return
+    if (!navigator.mediaDevices || !window.MediaRecorder) {
+      setVoiceStatus('mic unavailable')
+      return
+    }
+    setVoiceStatus('voice starting')
+    try {
+      const response = await fetch(urls.voiceSessions, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId: clientIdRef.current, worldId: selectedRoom?.worldId || roomId }),
+      })
+      if (!response.ok) {
+        const body = await response.json().catch(() => null)
+        throw new Error(body?.detail?.message || `Voice failed: ${response.status}`)
+      }
+      const session = await response.json()
+      setVoiceSession(session)
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      micStreamRef.current = stream
+      const socket = new WebSocket(voiceWsUrlForRoom(backendUrl, roomId, session.sessionId))
+      voiceSocketRef.current = socket
+      socket.addEventListener('open', () => {
+        const options = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? { mimeType: 'audio/webm;codecs=opus' } : undefined
+        const recorder = new MediaRecorder(stream, options)
+        mediaRecorderRef.current = recorder
+        recorder.addEventListener('dataavailable', (event) => {
+          if (event.data?.size && socket.readyState === WebSocket.OPEN) socket.send(event.data)
+        })
+        recorder.start(250)
+        setIsRecording(true)
+        setVoiceStatus('voice listening')
+      })
+      socket.addEventListener('close', () => {
+        stopVoice(false)
+      })
+    } catch (requestError) {
+      setVoiceStatus(requestError.message || 'voice error')
+      stopVoice(false)
+    }
+  }, [backendUrl, isRecording, roomId, selectedRoom?.worldId, stopVoice, urls])
+
+  const toggleVoice = useCallback(() => {
+    if (isRecording) stopVoice()
+    else startVoice()
+  }, [isRecording, startVoice, stopVoice])
 
   const handleMount = useCallback(
     (editor) => {
@@ -889,10 +1061,11 @@ export default function App() {
         cleanupStoreListenerRef.current = null
         socketRef.current?.close()
         socketRef.current = null
+        stopVoice(false)
         editorRef.current = null
       }
     },
-    [connectWebSocket, scheduleCaptureSend, urls],
+    [connectWebSocket, scheduleCaptureSend, stopVoice, urls],
   )
 
   if (!roomId) {
@@ -932,6 +1105,15 @@ export default function App() {
         error={semanticError}
       />
       <VisualObservationPanel observation={visualObservation} />
+      <VoicePanel
+        voiceStatus={voiceStatus}
+        voiceEvents={voiceEvents}
+        agentTurns={agentTurns}
+        proposals={proposals}
+        permissionRequests={permissionRequests}
+        isRecording={isRecording}
+        onToggleMic={toggleVoice}
+      />
       <section className="debug-panel" aria-label="Sync status">
         <div className={`status-dot status-${status}`} />
         <dl>

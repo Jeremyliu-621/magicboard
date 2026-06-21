@@ -46,6 +46,7 @@
     setActiveTab('');
     setPreviewSaveState('Save', false);
     setPreviewApplyState('Auto Apply', true);
+    setPreviewRejectState('Reject Proposal', true);
     DS.LevelPreview.enter(world, {
       onActivity(activeWorld, activity) {
         if (!activeWorld || !worldLibrary) return;
@@ -89,6 +90,13 @@
     button.disabled = !!disabled;
   }
 
+  function setPreviewRejectState(label, disabled) {
+    const button = document.getElementById('level-preview-reject');
+    if (!button) return;
+    button.textContent = label;
+    button.disabled = !!disabled;
+  }
+
   function openActiveDrawClient() {
     if (!DS.LevelPreview || !worldLibrary) return;
     const activeWorld = DS.LevelPreview.state && DS.LevelPreview.state.world;
@@ -125,6 +133,24 @@
     if (!activeWorld) return;
     setPreviewApplyState('Applying...', true);
     try {
+      const activeProposal = DS.LevelPreview.activeProposal && DS.LevelPreview.activeProposal();
+      if (activeProposal && activeProposal.approvalState === 'pending_approval') {
+        const proposal = await DS.LevelPreview.resolveActiveProposal(true);
+        const mapId = activeWorld.mapId || 'meadow';
+        const result = DS.MagicBoardGame.applyPatch(proposal.patch, {
+          rebuild() {
+            game.mapId = mapId;
+            game.rebuild();
+          },
+        });
+        if (!result.ok) throw new Error(result.errors.join('; '));
+        await DS.LevelPreview.markActiveProposalApplied(proposal.proposalId);
+        const updated = syncWorldFromStage(activeWorld, mapId);
+        if (updated) DS.LevelPreview.state.world = updated;
+        setPreviewApplyState('Applied', true);
+        window.setTimeout(() => setPreviewApplyState('Auto Apply', true), 1400);
+        return;
+      }
       let draft = DS.LevelPreview.state.semanticDraft;
       if (!draft) {
         const room = await DS.LevelPreview.saveCapture();
@@ -155,6 +181,37 @@
       setPreviewApplyState(error && error.message ? error.message : 'Apply failed', false);
       window.setTimeout(() => setPreviewApplyState('Auto Apply', true), 2200);
     }
+  }
+
+  async function rejectLevelPreviewProposal() {
+    if (!DS.LevelPreview) return;
+    setPreviewRejectState('Rejecting...', true);
+    try {
+      await DS.LevelPreview.resolveActiveProposal(false);
+      setPreviewRejectState('Rejected', true);
+      window.setTimeout(() => setPreviewRejectState('Reject Proposal', false), 1200);
+    } catch (error) {
+      console.warn('proposal reject failed', error);
+      setPreviewRejectState('Reject failed', false);
+    }
+  }
+
+  function playActivePreviewWorld() {
+    if (!DS.LevelPreview || !worldLibrary) return;
+    const activeWorld = DS.LevelPreview.state && DS.LevelPreview.state.world;
+    if (!activeWorld) return;
+    const mapId = activeWorld.mapId || activeWorld.id || 'meadow';
+    const launch = DS.MagicBoardGame && DS.MagicBoardGame.validateLaunchReady(mapId);
+    if (launch && !launch.ok) {
+      setPreviewApplyState('Missing ' + launch.missing.join(', '), false);
+      return;
+    }
+    exitLevelPreview();
+    game.modeId = activeWorld.modeId || 'smash';
+    game.mapId = mapId;
+    document.querySelector('.tab[data-tab="play"]').click();
+    game.rebuild();
+    game.start();
   }
 
   const autoAppliedKeys = new Set();
@@ -689,6 +746,19 @@
   document.getElementById('level-preview-apply').onclick = () => {
     if (DS.Audio) DS.Audio.play('ui_confirm');
     applyLevelPreviewSemanticDraft();
+  };
+  document.getElementById('level-preview-reject').onclick = () => {
+    if (DS.Audio) DS.Audio.play('ui_back');
+    rejectLevelPreviewProposal();
+  };
+  document.getElementById('level-preview-play').onclick = () => {
+    if (DS.Audio) DS.Audio.play('ui_confirm');
+    playActivePreviewWorld();
+  };
+  document.getElementById('level-preview-mic').onclick = () => {
+    if (DS.Audio) DS.Audio.play('ui_confirm');
+    if (DS.LevelPreview && DS.LevelPreview.state && DS.LevelPreview.state.mediaRecorder) DS.LevelPreview.stopVoiceSession();
+    else if (DS.LevelPreview) DS.LevelPreview.startVoiceSession();
   };
   document.getElementById('level-preview-save').onclick = () => {
     if (DS.Audio) DS.Audio.play('ui_confirm');
