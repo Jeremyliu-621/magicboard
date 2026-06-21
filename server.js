@@ -33,7 +33,11 @@ const FAL_PIPELINE = (process.env.FAL_PIPELINE || 'recraft').toLowerCase();
 // 'text' (default): generate a CLEAN game icon FROM the recognized label — ignore the doodle's shape
 // entirely (this is what gives a real game-asset look). 'image': image-to-image (traces the doodle —
 // only recolors it; kept for comparison via FAL_GEN_MODE=image).
-const FAL_GEN_MODE = (process.env.FAL_GEN_MODE || 'text').toLowerCase();
+// 'image' (default): image-to-image augments the kid's ALREADY-ISOLATED doodle — reliably clean +
+// on-shape across any object (text-to-image invents little SCENES for everyday objects like house/sun/
+// heart, which break the cutout). 'text': clean redraw from the label (loses the kid's shape; only
+// reliable for game-item words). Suite-tested 2026-06-21: i2i 9/9 clean vs t2i ~4/9 on crude doodles.
+const FAL_GEN_MODE = (process.env.FAL_GEN_MODE || 'image').toLowerCase();
 const FAL_GEN_MODEL_T2I = 'fal-ai/recraft/v3/text-to-image';
 const FAL_GEN_MODEL_I2I = 'fal-ai/recraft/v3/image-to-image';
 const FAL_RMBG_MODEL = 'fal-ai/bria/background/remove'; // saliency cutout (handles patterned backgrounds)
@@ -41,7 +45,7 @@ const FAL_RMBG_MODEL = 'fal-ai/bria/background/remove'; // saliency cutout (hand
 // digital_illustration/hand_drawn fits the doodle world; vector_illustration/bold_stroke is flatter.
 // Both are env-tunable so we can dial the look without code edits.
 const FAL_STYLE = process.env.FAL_STYLE || 'digital_illustration/hand_drawn';
-const FAL_STRENGTH = Number(process.env.FAL_STRENGTH || 0.68); // higher = upscales into a proper asset, not a doodle
+const FAL_STRENGTH = Number(process.env.FAL_STRENGTH || 0.72); // i2i: high enough to clean up + color, low enough to keep the kid's shape
 // ---- VLM (open-vocab doodle recognition) ----
 const VLM_MODEL = process.env.MAGICBOARD_VLM_MODEL || 'gpt-4.1-mini';
 // the words the game can turn into mechanics — steer the VLM toward a USABLE label (js/mechanics.js).
