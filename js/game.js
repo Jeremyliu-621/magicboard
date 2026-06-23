@@ -5,25 +5,6 @@
   const D = DS.draw;
   const POOF = 0.26; // seconds for a projectile's fade-out animation
 
-  // per-reaction visual style for element interactions (DS.Graph.react fx -> burst look). col = tint,
-  // pop = intensity, rise = wisps drift up (steam/fire/growth), debris = shards, ult = sharp burst.
-  const GRAPH_FX = {
-    steam:    { col: '#cfe7f5', pop: 0.8, rise: true },
-    mist:     { col: '#cfe7f5', pop: 0.6, rise: true },
-    dilute:   { col: '#bfe6c8', pop: 0.6, rise: true },
-    shock:    { col: '#8fd6ff', pop: 1.2, debris: 7, ult: true, stop: 0.06 },
-    overload: { col: '#8fd6ff', pop: 1.3, debris: 8, ult: true, stop: 0.06 },
-    shatter:  { col: '#bfe9ff', pop: 1.2, debris: 9, ult: true, stop: 0.05 },
-    ignite:   { col: '#ff8a3c', pop: 1.0, debris: 6, rise: true },
-    flare:    { col: '#ff8a3c', pop: 1.0, debris: 6, rise: true },
-    forge:    { col: '#ffb347', pop: 0.9, debris: 4, rise: true },
-    melt:     { col: '#ffae6b', pop: 0.8, debris: 3, rise: true },
-    grow:     { col: '#7fd18a', pop: 0.7, rise: true },
-    frost:    { col: '#cfeeff', pop: 0.7, debris: 4 },
-    rust:     { col: '#b5793c', pop: 0.7, debris: 4 },
-    ground:   { col: '#caa46a', pop: 0.8, debris: 5 },
-    flash:    { col: '#ffffff', pop: 1.6, ult: true, stop: 0.08, shakeBig: true },
-  };
   // per-player colours (markers + HUD cards) so up to 6 fighters read apart at a glance
   const PCOL = ['#5b8c5a', '#c0603a', '#3f6fa0', '#9a6cb0', '#b58a2e', '#3f8f86'];
   // after a winner is decided the match doesn't freeze — it keeps simulating (fighters can
@@ -74,7 +55,6 @@
       const skins = this.playerSkins || [];
       this.fighters.forEach((f, i) => { if (skins[i] && skins[i].enabled) { const ch = DS.data.clone(f.ch); ch.skin = skins[i]; f.ch = ch; } });
       this.projectiles = [];
-      this.props = []; // drawn items/props (DS.Prop) injected at runtime by DS.AI
       this.cam = { cx: d.view.w / 2, cy: d.view.h / 2, zoom: 1 };
       // dev: when set (a number), force a fixed overview zoom so you can see the whole
       // arena / blast borders. null = normal dynamic camera. Toggled by keys in main.js.
@@ -309,9 +289,6 @@
     start() {
       if (this.state !== 'playing') {
         if (this.state === 'over' || this.state === 'outro' || this.state === 'victory' || this.winner) this.rebuild();
-        if (DS.Finishers) DS.Finishers.preloadForGame(this);
-        this._finisherPollT = 0;
-        this._finisherPolling = false;
         this.state = 'playing';
       }
     }
@@ -346,144 +323,10 @@
       this.endMatch(w);
     }
 
-    tryStartFinisher(victim, world) {
-      if (!DS.Finishers || this.state !== 'playing' || this.finisher) return false;
-      const mode = this.mode;
-      if (mode && mode.elimination === false) return false;
-      if (!victim || victim.stocks > 1) return false;
-      const attacker = victim.lastHitBy;
-      if (!attacker || attacker === victim || attacker.dead) return false;
-      if (!victim.lastHitWasUltimate) return false;
-      const clip = DS.Finishers.findReadyClip(attacker, victim);
-      if (!clip) return false;
-      const video = DS.Finishers.videoForClip(clip);
-      if (!video) return false;
-      this.finisher = { victim, world, attacker, clip, video, t: 0, maxT: 6.5, done: false };
-      this.state = 'finisher';
-      this.effects.hitstopT = 0;
-      this.effects.shake(0.45);
-      try { video.pause(); video.currentTime = 0; } catch (_error) { /* ignore stale media seek errors */ }
-      video.onended = () => this._completeFinisher();
-      video.onerror = () => this._completeFinisher();
-      const played = video.play();
-      if (played && played.catch) played.catch(() => this._completeFinisher());
-      return true;
-    }
-
-    _completeFinisher() {
-      const finisher = this.finisher;
-      if (!finisher || finisher.done) return;
-      finisher.done = true;
-      try {
-        if (finisher.video) {
-          finisher.video.pause();
-          // un-fullscreen: park it off-screen so it's reusable but no longer covering the game
-          finisher.video.style.cssText = 'position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none';
-        }
-      } catch (_error) { /* ignore media cleanup errors */ }
-      this.finisher = null;
-      this.state = 'playing';
-      const v = finisher.victim;
-      if (!v) return;
-      if (finisher.item) {
-        // ITEM finisher: instant FULL elimination (lose all lives)
-        if (v.heldProp) { v.heldProp.held = null; v.heldProp = null; }
-        v.stocks = 0; v.dead = true; v.respawnT = 0;
-        if (finisher.world && finisher.world.onChange) finisher.world.onChange();
-      } else if (v._completeKO) {
-        v._completeKO(finisher.world);   // ultimate-KO finisher: one stock (unchanged)
-      }
-    }
-
-    // item-based finisher (parallel to tryStartFinisher; does NOT touch the ultimate-KO path).
-    tryStartItemFinisher(attacker, victim, world) {
-      if (!DS.Finishers || this.state !== 'playing' || this.finisher) return false;
-      if (!attacker || !victim || victim.dead || attacker === victim || !attacker.finisherReady) return false;
-      const clip = attacker.finisherClip || (DS.Finishers.findReadyItemClip && DS.Finishers.findReadyItemClip(attacker));
-      if (!clip) return false;
-      const video = DS.Finishers.videoForClip(clip);
-      if (!video) return false;
-      this.finisher = { victim, world, attacker, clip, video, t: 0, maxT: 6.5, done: false, item: true, phase: 'camera', camT: 0 };
-      this.state = 'finisher';
-      this.effects.shake(0.3);
-      return true;
-    }
-
-    _playFinisherVideo() {
-      const fin = this.finisher;
-      if (!fin || !fin.video) { this._completeFinisher(); return; }
-      const video = fin.video;
-      this.effects.shake(0.45);
-      video.muted = true; video.defaultMuted = true;   // guarantee inline muted autoplay (Safari)
-      video.setAttribute('muted', ''); video.setAttribute('playsinline', '');
-      // Play the clip as a REAL fullscreen DOM <video> over the canvas. Safari won't decode an off-screen
-      // <video> for canvas drawImage (readyState stays 0 -> you get the static "Finisher KO" fallback),
-      // so we show + play the element itself instead of blitting frames into the canvas.
-      video.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;object-fit:contain;background:#1c1815;z-index:99999;pointer-events:none';
-      if (document.body && video.parentNode !== document.body) document.body.appendChild(video);
-      try { video.currentTime = 0; } catch (_error) { /* stale media seek */ }
-      video.onended = () => this._completeFinisher();
-      video.onerror = () => { console.warn('[finisher] video error:', video.error && video.error.message, video.src); this._completeFinisher(); };
-      const tryPlay = (attempt) => {
-        const p = video.play();
-        if (p && p.then) {
-          p.then(() => console.log('[finisher] PLAYING', video.videoWidth + 'x' + video.videoHeight, 'readyState', video.readyState))
-           .catch((e) => {
-             console.warn('[finisher] play() rejected (attempt ' + attempt + '):', e && e.message);
-             if (attempt < 3) setTimeout(() => tryPlay(attempt + 1), 200);  // self-heal a transient block
-           });
-        }
-      };
-      tryPlay(1);
-    }
-
-    // armed holder pressed the finisher key while in range of an opponent -> start the item finisher
-    _checkItemFinishers(input) {
-      if (this.demo || this.finisher) return;
-      // Fires on the HOST keyboard (P1 'T', P2 'M') read GLOBALLY — so it works even when the fighter is
-      // driven by a phone controller (which has no finisher button). A pad pressFinisher is also honored.
-      const KEYS = ['KeyT', 'KeyM'];
-      for (let i = 0; i < this.fighters.length; i++) {
-        const f = this.fighters[i];
-        if (!f.finisherReady || f.finisherUsed || f.dead) continue;
-        const keyP = !!(DS.Input && DS.Input.pressed && DS.Input.pressed(KEYS[i]));
-        const padP = !!(input && input.player && input.player(i) && input.player(i).pressFinisher);
-        if (!keyP && !padP) continue;
-        let victim = null, best = Infinity;
-        for (const o of this.fighters) { if (o === f || o.dead) continue; const d = Math.hypot(o.x - f.x, o.y - f.y); if (d < best) { best = d; victim = o; } }
-        console.log('[finisher] P' + (i + 1) + ' key (kbd=' + keyP + ' pad=' + padP + ') | nearest opp dist=' + Math.round(best) + ' (need <=220) | firing=' + (!!victim && best <= 220));
-        if (victim && best <= 220 && this.tryStartItemFinisher(f, victim, this.world)) { f.finisherUsed = true; break; }
-      }
-    }
-
     update(dt, input) {
       // global controls
       if (DS.Input.pressed('Enter')) { if (this.state === 'ready' || this.state === 'over' || this.state === 'victory') this.start(); }
       if (DS.Input.pressed('KeyP')) this.togglePause();
-
-      if (this.state === 'finisher') {
-        const fin = this.finisher;
-        if (fin) {
-          if (fin.item && fin.phase === 'camera') {
-            // cinematic push-in framing both fighters BEFORE the video plays (~0.6s)
-            fin.camT += Math.min(dt, 0.05);
-            const a = fin.attacker, v = fin.victim, cam = this.cam;
-            if (cam && a && v) {
-              const tx = (a.x + v.x) / 2, ty = (a.y + v.y) / 2 - 24;
-              const tz = Math.max(1, Math.min(2.0, this.view.w / (Math.abs(a.x - v.x) + 540)));
-              const r = Math.min(1, dt * 4.5);
-              cam.cx += (tx - cam.cx) * r; cam.cy += (ty - cam.cy) * r; cam.zoom += (tz - cam.zoom) * r;
-            }
-            if (fin.camT >= 0.6) { fin.phase = 'video'; this._playFinisherVideo(); }
-          } else {
-            fin.t += Math.min(dt, 0.05);
-            const video = fin.video;
-            if (!video || video.ended || fin.t > fin.maxT) this._completeFinisher();
-          }
-        }
-        this.effects.update(dt);
-        return;
-      }
 
       // brush wipe: sim parked, advance the wipe + the (revealing) victory animation
       if (this.state === 'wipe') {
@@ -505,22 +348,14 @@
         return;
       }
       this._updateStage(dt);
-      this._pollFinishers(dt);
       if (this.demo) {
         this._aiT = (this._aiT || 0) + dt;
         for (const f of this.fighters) f.update(dt, this._ai(f), this.world);
       } else {
         for (let i = 0; i < this.fighters.length; i++) this.fighters[i].update(dt, input.player(i), this.world);
       }
-      this._checkItemFinishers(input);   // armed holder + finisher key + in range -> cinematic KO
       this._resolveBodies();
       this._updateProjectiles(dt);
-      if (this.props) {
-        for (const prop of this.props) prop.update(dt, this.world);
-        if (DS.Prop) DS.Prop.handlePickups(this);
-        if (DS.Prop && DS.Prop.handleEnvironment) DS.Prop.handleEnvironment(this, dt); // Track B: hazards/springs
-        this.props = this.props.filter((p) => !p.dead);
-      }
       this.effects.update(dt);
       // mode-specific scoring & win conditions (Smash also runs the stock/timer check here)
       this.mode.update(this, dt);
@@ -529,36 +364,6 @@
         this.outroT -= dt;
         this.winFlash = Math.max(0, (this.winFlash || 0) - dt * 0.7);
         if (this.outroT <= 0) this._beginWipe();
-      }
-    }
-
-    _pollFinishers(dt) {
-      if (!DS.Finishers || !DS.Finishers.refreshPendingForGame || this._finisherPolling) return;
-      this._finisherPollT = (this._finisherPollT || 0) - dt;
-      if (this._finisherPollT > 0) return;
-      this._finisherPollT = 2.2;
-      this._finisherPolling = true;
-      const done = () => {
-        this._finisherPolling = false;
-        if (!DS.Finishers) return;
-        DS.Finishers.preloadForGame(this);
-        // resolve item-finisher readiness: the GREEN aura appears once the clip is actually buffered
-        if (DS.Finishers.findReadyItemClip) {
-          for (const f of this.fighters) {
-            if (!f.hasPickedUpItem || f.finisherReady || !f.finisherCacheKey) continue;
-            const clip = DS.Finishers.findReadyItemClip(f);
-            if (!clip || !clip.videoUrl) continue;
-            const v = DS.Finishers.videoForClip(clip);
-            if (v && v.readyState >= 2) { f.finisherClip = clip; f.finisherReady = true; }
-          }
-        }
-      };
-      try {
-        const result = DS.Finishers.refreshPendingForGame(this);
-        if (result && result.then) result.then(done, done);
-        else done();
-      } catch (_error) {
-        done();
       }
     }
 
@@ -664,10 +469,6 @@
           if (f === pr.owner || f.dead || f.respawnT > 0 || f.invuln > 0) continue;
           if (Math.abs(f.x - pr.x) < f.w / 2 + pr.r && Math.abs(f.y - pr.y) < f.h / 2 + pr.r) {
             f._takeHit(pr.cfg, pr.vx >= 0 ? 1 : -1, pr.owner, this.world);
-            // graph projectile: run its on.hit (freeze/aoe/chain) on the struck fighter, then on.land
-            // (a bomb explodes on a direct hit too).
-            if (pr.cfg.onHit && DS.Graph) DS.Graph.runEffects(pr.cfg.onHit, { world: this.world, holder: pr.owner, hitTarget: f, x: pr.x, y: pr.y, facing: pr.facing });
-            this._graphLand(pr);
             if (pr.cfg.sniper) { this.effects.ultHit(pr.x, pr.y, 1.5, pr.owner && pr.owner.tagCol); this.effects.hitstop(0.12); } // satisfying snipe
             else this.effects.impact(pr.x, pr.y, 0.8);
             pr.dead = true; struck = true; break;
@@ -713,43 +514,16 @@
           } else if (pr.x > p.x && pr.x < p.x + p.w && pr.y > p.y && pr.y < p.y + p.h) {
             if (p._hp != null) this.damageBox(p, pr.cfg.damage || 6);
             else if (DS.Audio) DS.Audio.play('fizzle', { x: pr.x });
-            this._graphLand(pr);   // bomb/thrown graph projectile lands on a platform -> on.land (explode)
             this.effects.impact(pr.x, pr.y, 0.4); pr.dead = true; struck = true; break;
           }
         }
         if (struck) continue;
         // ran out of life / left the arena -> gentle shrink-and-fade poof (not a hard cut)
         if (pr.life <= 0 || pr.x < b.left || pr.x > b.right || pr.y < b.top || pr.y > b.bottom) {
-          this._graphLand(pr);   // ran out of life / left the arena -> on.land (timed explosion)
           pr.fade = POOF; pr.vx *= 0.25; pr.vy = pr.vy * 0.25 - 30; // drift up a touch as it dissipates
         }
       }
-      // element interactions: opposing-element shots (and tagged world props) react on contact
-      if (DS.Graph) DS.Graph.resolveContacts(this.projectiles, this.props, (r, x, y) => this._reactionFx(r, x, y));
       this.projectiles = this.projectiles.filter((p) => !p.dead && (p.fade == null || p.fade > 0));
-    }
-
-    // the visual for an element reaction — a distinct colour + burst per reaction family so each
-    // reads instantly (steam puffs up, electricity cracks, fire throws embers, annihilation flashes).
-    _reactionFx(r, x, y) {
-      const e = this.effects;
-      const S = GRAPH_FX[r.fx] || { col: '#ffffff', pop: 0.8 };
-      e.impact(x, y, S.pop);
-      e.charge(x, y, S.col);
-      if (S.ult) e.ultHit(x, y, S.pop, S.col);                          // electric/flash: sharp tonal burst
-      if (S.debris) e.debris(x, y, S.debris, S.pop);                    // shards / embers fly out
-      if (S.rise) for (let i = 0; i < 5; i++) e.aura(x, y - 4, S.col);  // steam / fire / growth wisps up
-      e.shake(S.shakeBig ? 0.3 : 0.12);
-      if (S.stop) e.hitstop(S.stop);
-      if (e.floatText && r.note) e.floatText(x, y - 24, r.note);        // "fizzle", "shock", ...
-      if (DS.Audio) DS.Audio.play('fizzle', { x: x });
-    }
-
-    // run a graph projectile's on.land effects ONCE, wherever it comes to rest (fighter/platform/life).
-    _graphLand(pr) {
-      if (pr._landed || !pr.cfg || !pr.cfg.onLand || !DS.Graph) return;
-      pr._landed = true;
-      DS.Graph.runEffects(pr.cfg.onLand, { world: this.world, holder: pr.owner, hitTarget: null, x: pr.x, y: pr.y, facing: pr.facing });
     }
 
     // boomerang hammer: flies out (decelerating) to mid range, then homes back to the thrower,
@@ -903,51 +677,8 @@
       // brush-wipe transition: paints the live game away to reveal the victory screen
       if (this.state === 'wipe') { this._renderWipe(ctx, cssW, cssH); return; }
       this._renderScene(ctx);
-      if (this.state === 'finisher') this._renderFinisherOverlay(ctx, cssW, cssH);
       // the win-moment darkening veil rides over the live game during the outro
       if (this.state === 'outro') this._outroVeil(ctx, cssW, cssH);
-    }
-
-    _renderFinisherOverlay(ctx, cssW, cssH) {
-      const finisher = this.finisher;
-      if (!finisher) return;
-      const t = Math.min(1, finisher.t / 0.18);
-      const panelW = Math.min(cssW * 0.82, cssH * 1.18);
-      const panelH = Math.min(cssH * 0.76, panelW * 0.72);
-      const x = (cssW - panelW) / 2, y = (cssH - panelH) / 2;
-      const rnd = DS.makeRng(331);
-      ctx.save();
-      ctx.globalAlpha = t;
-      ctx.fillStyle = 'rgba(28,24,21,.58)';
-      ctx.fillRect(0, 0, cssW, cssH);
-      ctx.translate(x, y);
-      D.roundedRect(ctx, 0, 0, panelW, panelH, 8, { width: 5, color: D.COL.ink, rnd, fill: D.COL.paper });
-      D.line(ctx, 14, 18, panelW - 12, 12, { width: 2.5, color: D.COL.inkSoft, rnd, passes: 1 });
-      D.line(ctx, 18, panelH - 16, panelW - 18, panelH - 22, { width: 2.5, color: D.COL.inkSoft, rnd, passes: 1 });
-      const pad = 22, vw = panelW - pad * 2, vh = panelH - pad * 2;
-      const video = finisher.video;
-      if (video && video.readyState >= 2) {
-        try {
-          const ar = (video.videoWidth || 16) / (video.videoHeight || 9);
-          let dw = vw, dh = dw / ar;
-          if (dh > vh) { dh = vh; dw = dh * ar; }
-          ctx.drawImage(video, pad + (vw - dw) / 2, pad + (vh - dh) / 2, dw, dh);
-        } catch (_error) {
-          this._renderFinisherFallback(ctx, panelW, panelH, finisher);
-        }
-      } else {
-        this._renderFinisherFallback(ctx, panelW, panelH, finisher);
-      }
-      ctx.restore();
-    }
-
-    _renderFinisherFallback(ctx, panelW, panelH, finisher) {
-      ctx.save();
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillStyle = D.COL.ink;
-      ctx.font = '34px "Gloria Hallelujah", cursive';
-      ctx.fillText((finisher.clip && finisher.clip.style ? finisher.clip.style : 'Finisher') + ' KO', panelW / 2, panelH / 2);
-      ctx.restore();
     }
 
     // dark wash that flares as the winner is decided then settles — "someone just won"
@@ -984,11 +715,9 @@
       DS.stage.drawBackground(ctx, this.stage, cam, home);
       this._renderBlastBorder(ctx);
       DS.stage.drawStage(ctx, this.stage, cam, home);
-      if (DS.CreateOverlay) DS.CreateOverlay.renderView(ctx, this);
       if (this.mode.renderWorld) this.mode.renderWorld(this, ctx);
       for (const f of this.fighters) f.render(ctx, this.world);
       this._renderProjectiles(ctx);
-      if (this.props) for (const prop of this.props) prop.render(ctx, this.world);
       this.effects.render(ctx);
       for (const f of this.fighters) this._marker(ctx, f);
       if (this.devBars) for (const f of this.fighters) this._devSpeedBar(ctx, f);
@@ -1001,7 +730,6 @@
       ctx.scale(this.scale, this.scale);
       this._hud(ctx);
       this._overlay(ctx);
-      if (DS.CreateOverlay) DS.CreateOverlay.renderHud(ctx, this);
       // dev: tiny indicator while the overview zoom is engaged
       if (this.devZoom) {
         const U = this._u();

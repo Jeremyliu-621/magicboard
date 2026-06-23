@@ -46,14 +46,6 @@
       this.damage = 0; this.stocks = data.settings.stocks;
       this.action = null; this.hitstun = 0; this.shielding = false; this.crouching = false;
       this.invuln = 1.0; this.respawnT = 0; this.dead = false;
-      this.heldProp = null; // a picked-up drawn item (DS.Prop); fire it with the attack button
-      // item FINISHER: the FIRST item you ever pick up imprints a Pika KO video (see prop.js / finishers.js).
-      this.hasPickedUpItem = false;  // one-shot: only the first pickup arms a finisher
-      this.finisherItem = null;      // { label, element }
-      this.finisherCacheKey = null;  // key into ch.finisher.clips once the job is created
-      this.finisherClip = null;      // resolved {videoUrl,...} once the video is buffered
-      this.finisherReady = false;    // true once buffered -> green aura
-      this.finisherUsed = false;     // spent after one elimination
       this.dropPlat = null; this.dropTimer = 0;
       this.animPhase = Math.random() * 6; this.blinkTimer = 1 + Math.random() * 3; this.blinkUntil = 0;
       this.expr = '';
@@ -411,7 +403,6 @@
     }
 
     _ko(world) {
-      if (world.game && world.game.tryStartFinisher && world.game.tryStartFinisher(this, world)) return;
       this._completeKO(world);
     }
 
@@ -581,12 +572,6 @@
         // which move comes out depends on state (see _pickAttack / _pickSpecial).
         const wolf = this.ult && this.ult.type === 'werewolf';
         if (!this.shielding) {
-          // a held drawn item (DS.Prop) fires on the attack button and consumes that press,
-          // so the normal melee doesn't also come out while you're carrying a weapon.
-          if (this.heldProp && input.pressAttack) {
-            this.heldProp.fire(world, this.aimHold || 0);
-            input = Object.assign({}, input, { pressAttack: false });
-          }
           if (input.pressAttack && this.attackCd <= 0) {
             if (this.item) {
               this._useItem(world);          // a held prop hijacks your next F (bat / blaster / bomb …)

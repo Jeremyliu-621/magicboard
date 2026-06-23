@@ -31,260 +31,21 @@
     });
   }
 
-  function hideRuntimeOverlays() {
-    closeHelp();
-    closeMenu();
-    document.getElementById('draw-overlay').hidden = true;
-  }
-
-  function enterLevelPreview(world) {
-    if (!world || !DS.LevelPreview) return;
-    hideRuntimeOverlays();
-    if (worldLibrary) worldLibrary.close();
-    editor.deactivate();
-    mode = 'levelPreview';
-    setActiveTab('');
-    setPreviewSaveState('Save', false);
-    setPreviewApplyState('Auto Apply', true);
-    DS.LevelPreview.enter(world, {
-      onActivity(activeWorld, activity) {
-        if (!activeWorld || !worldLibrary) return;
-        worldLibrary.updateWorld(activeWorld.id, {
-          lastEditedAt: activity && activity.updatedAt ? activity.updatedAt : new Date().toISOString(),
-        });
-      },
-      onSemanticDraft(activeWorld, draft) {
-        autoApplyLevelPreviewSemanticDraft(activeWorld, draft);
-      },
-      onStageEdit(activeWorld) {
-        if (!activeWorld) return;
-        const updated = syncWorldFromStage(activeWorld, activeWorld.mapId || activeWorld.id || 'meadow');
-        if (updated && DS.LevelPreview && DS.LevelPreview.state) DS.LevelPreview.state.world = updated;
-        if (game.mapId === (activeWorld.mapId || activeWorld.id)) game.rebuild();
-      },
-    });
-  }
-
-  function enterWorldStageEditor(world) {
-    if (!world) return;
-    exitLevelPreview();
-    hideRuntimeOverlays();
-    if (worldLibrary) worldLibrary.close();
-    mode = 'editor';
-    setActiveTab('editor');
-    game.mapId = world.mapId || world.id || 'meadow';
-    if (worldLibrary && worldLibrary.ensureWorldStage) worldLibrary.ensureWorldStage(world);
-    editor.editWorldStage(world);
-  }
-
-  function exitLevelPreview() {
-    if (DS.LevelPreview) DS.LevelPreview.exit();
-  }
-
-  function setPreviewSaveState(label, disabled) {
-    const button = document.getElementById('level-preview-save');
-    if (!button) return;
-    button.textContent = label;
-    button.disabled = !!disabled;
-  }
-
-  function setPreviewApplyState(label, disabled) {
-    const button = document.getElementById('level-preview-apply');
-    if (!button) return;
-    button.textContent = label;
-    button.disabled = !!disabled;
-  }
-
-  function openActiveDrawClient() {
-    if (!DS.LevelPreview || !worldLibrary) return;
-    const activeWorld = DS.LevelPreview.state && DS.LevelPreview.state.world;
-    if (!activeWorld) return;
-    const url = worldLibrary.drawClientUrl(activeWorld);
-    global.open(url, '_blank', 'noopener');
-  }
-
-  async function saveLevelPreviewCapture() {
-    if (!DS.LevelPreview || !worldLibrary) return;
-    const activeWorld = DS.LevelPreview.state && DS.LevelPreview.state.world;
-    const activeRoomId = DS.LevelPreview.state && DS.LevelPreview.state.roomId;
-    if (!activeWorld) return;
-    setPreviewSaveState('Saving...', true);
-    try {
-      const roomCapture = await DS.LevelPreview.saveCapture();
-      if (!DS.LevelPreview.state || DS.LevelPreview.state.world !== activeWorld || DS.LevelPreview.state.roomId !== activeRoomId) {
-        throw new Error('Level changed before save completed.');
-      }
-      const updated = worldLibrary.saveDrawingCapture(activeWorld.id, roomCapture);
-      if (!updated) throw new Error('World save failed.');
-      DS.LevelPreview.state.world = updated;
-      setPreviewSaveState('Saved', true);
-      window.setTimeout(() => setPreviewSaveState('Save', false), 1200);
-    } catch (error) {
-      console.warn('level preview save failed', error);
-      setPreviewSaveState('Save failed', false);
-    }
-  }
-
-  async function applyLevelPreviewSemanticDraft() {
-    if (!DS.LevelPreview || !DS.MagicBoardGame || !worldLibrary) return;
-    const activeWorld = DS.LevelPreview.state && DS.LevelPreview.state.world;
-    if (!activeWorld) return;
-    setPreviewApplyState('Applying...', true);
-    try {
-      let draft = DS.LevelPreview.state.semanticDraft;
-      if (!draft) {
-        const room = await DS.LevelPreview.saveCapture();
-        draft = room.semanticDraft;
-      }
-      const mapId = activeWorld.mapId || 'meadow';
-      const patch = DS.MagicBoardGame.buildPatchFromSemanticDraft(draft, {
-        worldId: activeWorld.id,
-        roomId: activeWorld.roomId || activeWorld.id,
-        mapId,
-        replacePlatforms: false,
-      });
-      if (!patch.operations.length) throw new Error('Confirm at least one object first.');
-      const result = DS.MagicBoardGame.applyPatch(patch, {
-        rebuild() {
-          game.mapId = mapId;
-          game.rebuild();
-        },
-      });
-      if (!result.ok) throw new Error(result.errors.join('; '));
-
-      const updated = syncWorldFromStage(activeWorld, mapId);
-      if (updated) DS.LevelPreview.state.world = updated;
-      setPreviewApplyState('Applied', true);
-      window.setTimeout(() => setPreviewApplyState('Auto Apply', true), 1400);
-    } catch (error) {
-      console.warn('semantic apply failed', error);
-      setPreviewApplyState(error && error.message ? error.message : 'Apply failed', false);
-      window.setTimeout(() => setPreviewApplyState('Auto Apply', true), 2200);
-    }
-  }
-
-  function playActivePreviewWorld() {
-    if (!DS.LevelPreview || !worldLibrary) return;
-    const activeWorld = DS.LevelPreview.state && DS.LevelPreview.state.world;
-    if (!activeWorld) return;
-    const mapId = activeWorld.mapId || activeWorld.id || 'meadow';
-    const launch = DS.MagicBoardGame && DS.MagicBoardGame.validateLaunchReady(mapId);
-    if (launch && !launch.ok) {
-      setPreviewApplyState('Missing ' + launch.missing.join(', '), false);
-      return;
-    }
-    exitLevelPreview();
-    game.modeId = activeWorld.modeId || 'smash';
-    game.mapId = mapId;
-    game.rebuild();
-    selMode = game.modeId;
-    selMap = game.mapId;
-    document.querySelector('.tab[data-tab="play"]').click();
-    openMenu();
-  }
-
-  const autoAppliedKeys = new Set();
-  function autoApplyLevelPreviewSemanticDraft(activeWorld, draft) {
-    if (!activeWorld || !draft || !DS.MagicBoardGame || !worldLibrary) return;
-    const key = [
-      activeWorld.id,
-      draft.captureVersion || 0,
-      (draft.answers || []).map((answer) => answer.answerId || answer.candidateId).sort().join('|'),
-    ].join(':');
-    if (autoAppliedKeys.has(key)) return;
-    const patch = DS.MagicBoardGame.buildPatchFromSemanticDraft(draft, {
-      worldId: activeWorld.id,
-      roomId: activeWorld.roomId || activeWorld.id,
-      mapId: activeWorld.mapId || 'meadow',
-      replacePlatforms: false,
-    });
-    if (!patch.operations.length) return;
-    const result = DS.MagicBoardGame.applyPatch(patch, {
-      rebuild() {
-        if (game.mapId === (activeWorld.mapId || 'meadow')) game.rebuild();
-      },
-    });
-    if (!result.ok) {
-      console.warn('semantic auto-apply failed', result.errors);
-      return;
-    }
-    autoAppliedKeys.add(key);
-    const updated = syncWorldFromStage(activeWorld, activeWorld.mapId || 'meadow');
-    if (updated && DS.LevelPreview && DS.LevelPreview.state.world && DS.LevelPreview.state.world.id === updated.id) {
-      DS.LevelPreview.state.world = updated;
-    }
-    setPreviewApplyState('Auto applied', true);
-    window.setTimeout(() => setPreviewApplyState('Auto Apply', true), 1200);
-  }
-
-  function syncWorldFromStage(activeWorld, mapId) {
-    if (!activeWorld || !worldLibrary) return null;
-    const stage = DS.Maps.stageFor(DS.Store.data, mapId);
-    const spawns = (stage.spawns && stage.spawns.length >= 2 ? stage.spawns : [{ x: 660, y: 780 }, { x: 1260, y: 780 }]).slice(0, 2);
-    const characters = (activeWorld.draft && activeWorld.draft.characters && activeWorld.draft.characters.length
-      ? activeWorld.draft.characters
-      : (DS.Store.data.roster || ['Sprout', 'Acorn']).slice(0, 2));
-    return worldLibrary.updateWorld(activeWorld.id, {
-      lastEditedAt: new Date().toISOString(),
-      mapId,
-      draft: {
-        platforms: stage.platforms || [],
-        portals: stage.portals || [],
-        spawns,
-        characters,
-      },
-    });
-  }
-
-  function openHomeLibrary() {
-    if (global.history && global.history.replaceState && global.location.hash !== '#library') {
-      global.history.replaceState(null, '', global.location.pathname + global.location.search + '#library');
-    }
-    exitLevelPreview();
-    closeHelp();
-    closeMenu();
-    document.getElementById('draw-overlay').hidden = true;
-    editor.deactivate();
-    mode = 'play';
-    setActiveTab('');
-    if (game.state === 'playing') game.togglePause();
-    if (worldLibrary) worldLibrary.open();
-    else openMenu();
-  }
-
   // how many fighters a match spawns: one per joined phone (2..6), else 2 for the keyboard.
   // read live at each rebuild so newly-joined phones are included in the next match.
   game.getPlayerCount = () => {
     if (!DS.Net.available()) return 2;
     return Math.max(2, Math.min(6, DS.Net.maxSlot() || 2));
   };
-  const worldLibrary = DS.WorldLibrary && DS.WorldLibrary.init({
-    onEdit(world) {
-      enterLevelPreview(world);
-    },
-    onPlay(world) {
-      exitLevelPreview();
-      if (worldLibrary && worldLibrary.ensureWorldStage) worldLibrary.ensureWorldStage(world);
-      game.modeId = world.modeId || 'smash';
-      game.mapId = world.mapId || world.id || 'meadow';
-      selMode = game.modeId;
-      selMap = game.mapId;
-      document.querySelector('.tab[data-tab="play"]').click();
-      game.rebuild();
-      openMenu();
-    },
-  });
-
   // tabs
   let mode = 'play';
   document.querySelectorAll('.tab').forEach((t) => {
     t.onclick = () => {
       setActiveTab(t.dataset.tab);
       mode = t.dataset.tab;
-      exitLevelPreview();
       // the menu/lobby/draw overlays sit over the stage area — dismiss them when entering the
       // Editor so its canvas (platform dragging etc.) isn't covered
-      if (mode === 'editor') { closeMenu(); if (worldLibrary) worldLibrary.close(); document.getElementById('draw-overlay').hidden = true; editor.activate(); }
+      if (mode === 'editor') { closeMenu(); document.getElementById('draw-overlay').hidden = true; editor.activate(); }
       else { editor.deactivate(); }
     };
   });
@@ -312,17 +73,13 @@
   const countdownCanvas = document.getElementById('countdown-canvas');
   let selMode = game.modeId || 'smash';
   let selMap = game.mapId || 'demo';
-  let ults = [], ready = [], ultimateJobs = [], cd = null; // cd = active countdown state (null when idle)
+  let ults = [], ready = [], cd = null; // cd = active countdown state (null when idle)
   let playerSkins = [], drawIndex = -1, drawing = null, drawHist = [];
   const drawOverlay = document.getElementById('draw-overlay');
   const drawCanvas = document.getElementById('draw-canvas');
   const drawTitle = document.getElementById('draw-title');
   const ULTS = [{ id: 'hammer', name: 'Hammer' }, { id: 'sniper', name: 'Sniper' }, { id: 'werewolf', name: 'Werewolf' }];
   const mkEl = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
-  if (DS.UltimateRecorder) {
-    DS.UltimateRecorder.onChange = () => { if (!lobby.hidden) buildLobbyCols(); };
-  }
-
   // ---- doodle icons ----
   function paintCanvas(cv, lw, lh, fn) {
     const dpr = DS.DPR || 1; cv.width = Math.round(lw * dpr); cv.height = Math.round(lh * dpr);
@@ -453,7 +210,6 @@
     if (sm) renderMapPreview(sm.id, sm.name);
   }
   function openMenu() {
-    if (worldLibrary) worldLibrary.close();
     if (game.state === 'playing') game.togglePause();
     if (DS.Net.available()) { DS.Net.onChange = () => { if (!lobby.hidden) refreshLobby(); }; DS.Net.host(); }
     buildSetup(); lobby.hidden = true; cancelCountdown(); menu.hidden = false;
@@ -478,75 +234,6 @@
     if (sk && sk.enabled) { ch = DS.data.clone(ch); ch.skin = sk; }
     return ch;
   }
-  function ultimateStyle(i) {
-    return ults[i] === 'sniper' ? 'Dissolve' : ults[i] === 'werewolf' ? 'Tear' : 'Squish';
-  }
-  function ultimateState(i) {
-    const st = DS.UltimateRecorder && DS.UltimateRecorder.getState ? DS.UltimateRecorder.getState(i) : { state: 'camera needed' };
-    const ch = lobbyCharacter(i);
-    const finisher = DS.Finishers && ch && DS.Finishers.ensure ? DS.Finishers.ensure(ch) : null;
-    const custom = finisher && finisher.customUltimates && finisher.customUltimates[String(i)];
-    if (custom && custom.armed && custom.videoUrl) return { label: 'custom ultimate ready', cls: 'ready' };
-    if (ultimateJobs[i] && ultimateJobs[i].status === 'ready') return { label: 'custom ultimate ready', cls: 'ready' };
-    if (ultimateJobs[i] && ultimateJobs[i].status === 'missing_key') return { label: 'using default', cls: '' };
-    if (ultimateJobs[i] && ultimateJobs[i].status === 'failed') return { label: 'failed', cls: 'bad' };
-    const label = st && st.state ? st.state : 'camera needed';
-    return { label, cls: label === 'failed' ? 'bad' : label === 'custom ultimate ready' ? 'ready' : '' };
-  }
-  async function recordUltimate(i) {
-    if (!DS.UltimateRecorder || !DS.Finishers) return;
-    const characterId = lobbyCharacterId(i);
-    const ch = lobbyCharacter(i);
-    const skinHash = DS.Finishers.victimSkinHash('P' + (i + 1), ch);
-    DS.UltimateRecorder.configurePlayer(i, { character: ch, facing: i === 1 ? -1 : 1 });
-    try {
-      const cameraReady = await DS.UltimateRecorder.startCamera(i);
-      if (!cameraReady) return;
-      const motionClipDataUrl = await DS.UltimateRecorder.startRecording(i);
-      if (!motionClipDataUrl) return;
-      const keyframeDataUrls = DS.UltimateRecorder.getKeyframes();
-      const motionSummary = DS.UltimateRecorder.getMotionSummary();
-      DS.UltimateRecorder.hide();
-      const result = await DS.Finishers.generateCustomUltimate(i, characterId, {
-        style: ultimateStyle(i),
-        skinHash,
-        imageDataUrl: DS.Finishers.renderCharacterDataUrl(ch),
-        motionClipDataUrl,
-        keyframeDataUrls,
-        motionSummary,
-      });
-      ultimateJobs[i] = { characterId, key: result.key, status: result.job.status, jobId: result.job.jobId };
-      applyUltimateJobState(i, result.job);
-      if (result.job.status === 'queued' || result.job.status === 'generating') pollUltimateJob(i, characterId, result.key);
-    } catch (error) {
-      DS.UltimateRecorder.setJobState(i, 'using default', error && error.message ? error.message : 'record failed');
-    } finally {
-      if (!lobby.hidden) buildLobbyCols();
-    }
-  }
-  function applyUltimateJobState(i, job) {
-    if (!DS.UltimateRecorder || !job) return;
-    if (!ultimateJobs[i]) ultimateJobs[i] = {};
-    ultimateJobs[i].status = job.status;
-    if (job.status === 'ready') DS.UltimateRecorder.setJobState(i, 'custom ultimate ready');
-    else if (job.status === 'missing_key') DS.UltimateRecorder.setJobState(i, 'using default');
-    else if (job.status === 'failed') DS.UltimateRecorder.setJobState(i, 'failed', job.error || 'generation failed');
-    else DS.UltimateRecorder.setJobState(i, 'generating');
-  }
-  function pollUltimateJob(i, characterId, key) {
-    if (!DS.Finishers || !key) return;
-    setTimeout(async () => {
-      try {
-        const job = await DS.Finishers.refresh(characterId, key);
-        applyUltimateJobState(i, job);
-        if (job.status === 'queued' || job.status === 'generating') pollUltimateJob(i, characterId, key);
-      } catch (error) {
-        if (DS.UltimateRecorder) DS.UltimateRecorder.setJobState(i, 'failed', error && error.message ? error.message : 'poll failed');
-      } finally {
-        if (!lobby.hidden) buildLobbyCols();
-      }
-    }, 2200);
-  }
   function lobbyColumn(i) {
     const onPhone = DS.Net.hasPlayer(i + 1);   // a phone owns this slot → host shows it read-only
     const col = mkEl('div', 'lobby-col' + (ready[i] ? ' ready' : ''));
@@ -570,12 +257,6 @@
     // keyboard slot (no phone) — the host drives draw / ult / ready as before
     const db = mkEl('button', 'lobby-draw', (playerSkins[i] && playerSkins[i].enabled) ? '✎ Redraw' : '✎ Draw');
     db.onclick = () => openDraw(i); col.appendChild(db);
-    const recState = ultimateState(i);
-    const rec = mkEl('button', 'lobby-record', 'Record Ultimate');
-    rec.disabled = recState.label === 'recording' || recState.label === 'generating';
-    rec.onclick = () => recordUltimate(i);
-    col.appendChild(rec);
-    col.appendChild(mkEl('div', 'lobby-ultimate-state' + (recState.cls ? ' ' + recState.cls : ''), recState.label));
     const ur = mkEl('div', 'lobby-ults');
     ULTS.forEach((u) => {
       const ub = mkEl('button', 'lobby-ult' + (ults[i] === u.id ? ' sel' : '')); const c2 = document.createElement('canvas');
@@ -622,7 +303,7 @@
         if (ready[i] == null) ready[i] = false;
       }
     }
-    ults.length = n; ready.length = n; ultimateJobs.length = n; renderLobbyTop(); buildLobbyCols();
+    ults.length = n; ready.length = n; renderLobbyTop(); buildLobbyCols();
   }
   function openLobby() {
     menu.hidden = true; ults = []; ready = [];
@@ -852,28 +533,9 @@
 
   document.getElementById('brand-home').onclick = () => {
     if (DS.Audio) DS.Audio.play('ui_confirm');
-    openHomeLibrary();
+    openMenu();
   };
   document.getElementById('btn-menu').onclick = () => { if (DS.Audio) DS.Audio.play('ui_confirm'); openMenu(); };
-  document.getElementById('level-preview-library').onclick = () => {
-    openHomeLibrary();
-  };
-  document.getElementById('level-preview-draw').onclick = () => {
-    if (DS.Audio) DS.Audio.play('ui_confirm');
-    openActiveDrawClient();
-  };
-  document.getElementById('level-preview-apply').onclick = () => {
-    if (DS.Audio) DS.Audio.play('ui_confirm');
-    applyLevelPreviewSemanticDraft();
-  };
-  document.getElementById('level-preview-play').onclick = () => {
-    if (DS.Audio) DS.Audio.play('ui_confirm');
-    playActivePreviewWorld();
-  };
-  document.getElementById('level-preview-save').onclick = () => {
-    if (DS.Audio) DS.Audio.play('ui_confirm');
-    saveLevelPreviewCapture();
-  };
   document.getElementById('menu-start').onclick = () => { if (DS.Audio) DS.Audio.play('ui_confirm'); openLobby(); };       // Next → lobby
   document.getElementById('lobby-back').onclick = () => { if (DS.Audio) DS.Audio.play('ui_back'); cancelCountdown(); lobby.hidden = true; menu.hidden = false; };
 
@@ -904,9 +566,7 @@
       ctx.setTransform(DS.DPR, 0, 0, DS.DPR, 0, 0);
       const cssW = canvas.clientWidth, cssH = canvas.clientHeight;
 
-      if (mode === 'levelPreview') {
-        if (DS.LevelPreview) DS.LevelPreview.render(ctx, cssW, cssH);
-      } else if (mode === 'play') {
+      if (mode === 'play') {
         // --- dev camera zoom: see the whole arena / blast borders ---
         //  -  zoom out   ·   =  zoom in   ·   0  toggle overview   ·   \  back to auto
         if (DS.Input.pressed('Digit0')) game.devZoom = game.devZoom ? null : 0.3;
@@ -934,16 +594,11 @@
   }
   requestAnimationFrame(frame);
 
-  // expose for debugging and optional creation overlay bridge
+  // expose for debugging
   DS.game = game; DS.editor = editor;
-  if (DS.CreateOverlay) DS.CreateOverlay.init();
 
-  // DEMO MODE (open the game at .../#demo): force-hide the teammate's level-build / library overlays
-  // so a demo goes straight to Play + the iPad draw pad. Non-destructive — only active with the flag.
+  // DEMO MODE (open the game at .../#demo): tag the body so a demo goes straight to Play.
   if (location.hash.indexOf('#demo') === 0 || /[?&]demo\b/.test(location.search)) {
-    const st = document.createElement('style');
-    st.textContent = '#level-preview-ui,#library-overlay{display:none !important;}';
-    document.head.appendChild(st);
     document.body.classList.add('demo-mode');
   }
 
@@ -1807,7 +1462,7 @@
     }, 300);
   }
   if (location.hash === '#demo') { game.demo = true; game.start(); }
-  else if (location.hash === '#library') { if (worldLibrary) worldLibrary.open(); else openMenu(); }
+  else if (location.hash === '#library') openMenu();
   else if (location.hash === '#lobby') openLobby(); // preview the lobby page
   else if (location.hash === '#setup') openMenu();  // preview the setup page
   else if (location.hash === '#draw') { openLobby(); openDraw(0); } // preview the draw pad
@@ -1840,5 +1495,5 @@
     document.querySelector('.tab[data-tab="editor"]').click();
   }
   // fresh load with no dev hash: creation-first Game Library.
-  else if (location.hash === '') { if (worldLibrary) worldLibrary.open(); else openMenu(); }
+  else if (location.hash === '') openMenu();
 })(window);

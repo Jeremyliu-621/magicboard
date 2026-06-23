@@ -161,7 +161,6 @@
 
   // ---- default content -----------------------------------------------------
   function defaults() {
-    const stageReference = DS.stageReference || { view: VIEW, platforms: [] };
     return {
       version: 4,
       view: { w: VIEW.w, h: VIEW.h },
@@ -178,8 +177,13 @@
         blast: { left: -1100, right: VIEW.w + 1100, top: -900, bottom: VIEW.h + 950 },
       },
       stage: {
-        // [x, y(top), w, h, passthrough] — laid out in the 1920x1080 view
-        platforms: clone(stageReference.platforms),
+        // [x, y(top), w, h, passthrough] — the classic editable stage, laid out in the 1920x1080 view
+        platforms: [
+          { x: 225,  y: 863, w: 1470, h: 195, kind: 'wood', pass: false }, // main ground
+          { x: 143,  y: 705, w: 353,  h: 39,  kind: 'wood', pass: true },  // left float
+          { x: 768,  y: 468, w: 384,  h: 39,  kind: 'wood', pass: true },  // center-high float
+          { x: 1425, y: 705, w: 353,  h: 39,  kind: 'wood', pass: true },  // right float
+        ],
         spawns: [ { x: 660, y: 780 }, { x: 1260, y: 780 } ],
         // background structures (drawn behind, faded for depth) — rolling hills + a far ridge
         bg: [
@@ -214,7 +218,8 @@
   // ---- store ---------------------------------------------------------------
   // Bumping the key forces fresh defaults to load instead of an older save winning the merge.
   // v16: Ddoski offsetY 14 (feet on the ground).
-  const KEY = 'doodle-smash:data:v16';
+  // v17: restore the default stage platforms (the AI/iPad pipeline used to seed them; now baked in).
+  const KEY = 'doodle-smash:data:v17';
 
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
 

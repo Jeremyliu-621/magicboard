@@ -3,9 +3,10 @@
 A hand-drawn 2D platform fighter (Super Smash Bros–inspired) rendered in a charcoal
 "soft marker" doodle style. Vanilla HTML5 Canvas + JavaScript — **no build, no deps**.
 
-See [GOAL.md](GOAL.md) for the project's north star: a **live creation game** where players draw
-characters, weapons, and hazards on an iPad and an AI pipeline injects them — refined and
-functional — into a projected match in real time. Runtime design: [docs/13](docs/13-ai-pipeline.md).
+It's a self-contained game: two doodle fighters battle on a doodle stage at 60fps, and the
+in-app **Editor** lets you reshape poses, draw your own fighter, edit stages, and tune settings —
+all persisted to your browser. (An earlier iPad-drawing + AI-enhancement creation pipeline has been
+removed; everything authorable now lives in the Editor.)
 
 **Working on this?** Read [`docs/`](docs/) first — especially
 [`docs/02-aesthetic-rules.md`](docs/02-aesthetic-rules.md), the visual contract that keeps the
@@ -16,29 +17,6 @@ draw tool, how to extend things, and the dev workflow.
 
 Just open `index.html` in a browser (double-click it, or drag it into Chrome).
 No server or install needed.
-
-### MagicBoard drawing
-
-Local desktop and iPad testing can stay on HTTP:
-
-```bash
-cd backend
-cp .env.example .env
-# fill OPENAI_API_KEY and MAGICBOARD_VLM_MODEL for VLM classification
-uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-
-cd ../draw-client
-npm install
-npm run dev -- --host 0.0.0.0
-
-cd ..
-npm install
-npm start
-```
-
-Open the desktop game with `?backend=http://YOUR-LAN-IP:8000&drawClient=http://YOUR-LAN-IP:5173/`, then open the draw client on the iPad. The flow is doodle first: VLM classification can auto-confirm platform/spike/etc. candidates, and the iPad manual choice menu is the fallback when classification fails or is unavailable.
-
-Provider keys belong only in `backend/.env`; do not put OpenAI keys in `draw-client/.env`.
 
 ### Phone controllers (optional)
 To let people **join by scanning a QR code** and use their phone as a controller (a landscape
@@ -123,14 +101,10 @@ use **Export/Import** to move setups between machines.
 | `js/editor.js` | The editor tab. |
 | `js/main.js` | Canvas/DPR sizing, tabs, frame loop. |
 
-## Notes toward the AI creation pipeline
+## Notes on the data model
 
-- **Skin / stage / mechanic data is plain and serializable.** AI-generated content (vector strokes,
-  `data.stage.platforms` rectangles, mechanic specs) flows through the same seams the editor uses, so
-  the drawing pipeline, agents, and the editor all produce the data the game reads. See
-  [docs/13](docs/13-ai-pipeline.md).
+- **Skin / stage data is plain and serializable.** Drawn skins (vector strokes), `data.stage.platforms`
+  rectangles, and settings are plain JSON in `Store` (localStorage, export/import) — the Editor mutates
+  the same data the game reads live.
 - **Rendering is isolated** behind `draw.js`; `draw.getCached()` pose-caches to offscreen canvases so
   per-frame cost stays low when many drawn entities are on screen.
-- **(Optional, far-future)** a computer-vision module could also generate `data.stage.platforms` from
-  detected real-world surfaces through the same seam — a nicety, not the goal. See
-  [docs/08](docs/08-roadmap-and-cv-ar.md).

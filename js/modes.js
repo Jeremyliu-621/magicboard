@@ -125,7 +125,7 @@
 
   // ---- maps ----------------------------------------------------------------
   const Maps = {
-    _order: ['demo', 'meadow', 'twin', 'loft', 'quarry', 'ruins', 'crates', 'bounce', 'cannons', 'portals', 'chaos'],
+    _order: ['demo', 'meadow', 'loft', 'quarry', 'crates', 'bounce', 'cannons', 'portals', 'chaos'],
     defs: {
       demo: {
         id: 'demo', name: 'Demo', editable: true,
@@ -443,7 +443,7 @@
       if (this.isCustom(id)) return { id, name: 'Custom Level', editable: true, custom: true };
       return this.defs.meadow;
     },
-    list() { return this._order.map((id) => this.defs[id]); },
+    list() { return this._order.map((id) => this.defs[id]).filter(Boolean); },
 
     // The editable, PERSISTENT stage for a map. Meadow is the live Editor-owned data.stage;
     // every preset is materialised from its build() ONCE into data.stages[id], then edits to it
@@ -779,7 +779,7 @@
       },
     },
     get(id) { return this.defs[id] || this.defs.smash; },
-    list() { return this._order.map((id) => this.defs[id]); },
+    list() { return this._order.map((id) => this.defs[id]).filter(Boolean); },
   };
 
   DS.Maps = Maps;

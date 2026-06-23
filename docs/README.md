@@ -19,19 +19,17 @@ the visual contract that keeps the game looking like one coherent hand-drawn wor
 | [10-modes-and-maps.md](10-modes-and-maps.md) | Game modes + map presets registries, the main menu, how to add either. |
 | [11-online-controllers.md](11-online-controllers.md) | Lobbies + phone controllers: the server, the QR/controller page, the WS relay, input routing. |
 | [12-sound.md](12-sound.md) | The WebAudio SFX system: synthesis, polyphony, camera-aware panning. |
-| [13-ai-pipeline.md](13-ai-pipeline.md) | **The AI creation pipeline.** CAELLUM (visual enhance, Trainium) · CHLOE (mechanic injection) · JEREMY (sync). Runtime execution blueprint. |
-| [13-ipad-drawing-capture-and-editor-seams.md](13-ipad-drawing-capture-and-editor-seams.md) | Drawing capture, projection, and existing editor/game seams. |
-| [14-visual-creation-phases.md](14-visual-creation-phases.md) | Creation-first phase architecture: drawing bridge, world library, clarification agent, playable world patches, rules, asset enhancement. |
-| [15-creation-patch-contract.md](15-creation-patch-contract.md) | Proposed typed patch contract for approved scene edits. |
-| [16-agent-clarification-loop.md](16-agent-clarification-loop.md) | Accept/reject/ask loop and scene-plan contract. |
+
+> Note: an earlier iPad-drawing + AI-enhancement creation pipeline (CAELLUM/CHLOE visual enhance +
+> mechanic injection, draw-client, model training) was **removed** — the game is now self-contained
+> and all authoring happens in the in-app Editor. Some prose in `00-vision.md` / `03` / `08` still
+> describes that direction as aspirational.
 
 ## 30-second orientation
 - Vanilla **HTML5 Canvas 2D + JS**, no build, no deps. Open `index.html` (or serve it).
 - Hand-drawn **charcoal-on-paper doodle** look, generated procedurally (no image assets).
 - Local 2-player platform fighter, Smash-style. Plus a **Draw** tool to make your own fighters.
-- Players draw entities on an iPad; an **AI pipeline enhances them and injects them live** into the projected match (see [13](13-ai-pipeline.md)).
-- Product direction now starts with a **Game Library** and required iPad/draw-client world creation before play.
-- Built so a **visual creation layer** and later CV/AR modules can feed game-valid world data into the same runtime.
+- All authoring is in the in-app **Editor** (poses, draw-your-own skins, stages, settings).
 - Single source of truth: `js/data.js` `Store` (localStorage). Editor writes it, game reads it.
 
 ## Golden rules (the short version)
