@@ -68,9 +68,13 @@
         </div>
       </div>
 
-      <!-- Lobby page: QR + joined players (top); per-player columns w/ ult pick + ready (bottom) -->
+      <!-- Lobby page: title + hint (top); QR + joined players; per-player fighter columns w/ ult pick + ready -->
       <div id="lobby-overlay" class="screen" hidden>
         <div class="page-card lobby-page">
+          <div class="lobby-header">
+            <div class="menu-title">Choose Your Fighter</div>
+            <div id="lobby-hint" class="lobby-hint"></div>
+          </div>
           <div class="lobby-top">
             <div id="lobby-qr" class="lobby-qr-box"></div>
             <div id="lobby-players" class="lobby-players"></div>
@@ -78,7 +82,6 @@
           <div id="lobby-cols" class="lobby-cols"></div>
           <div class="menu-footer">
             <button id="lobby-back">◀ Back</button>
-            <span id="lobby-hint" class="lobby-hint"></span>
           </div>
         </div>
       </div>

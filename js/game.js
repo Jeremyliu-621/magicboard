@@ -908,11 +908,15 @@
 
     _face(ctx, ch, rnd) {
       const ink = D.COL.ink;
-      D.circle(ctx, 0, 0, 17, { width: 4.5, color: ink, rnd });
-      ctx.strokeStyle = ink; ctx.lineWidth = 3.5; ctx.lineCap = 'round';
-      for (const ex of [-4, 4]) { ctx.beginPath(); ctx.moveTo(ex, -2); ctx.lineTo(ex, 4); ctx.stroke(); }
-      if (ch.head === 'spikes') for (let i = -1; i <= 1; i++) D.line(ctx, i * 7, -14, i * 10, -26, { width: 4, color: ink, rnd, passes: 1 });
-      else if (ch.head === 'beanie') { D.line(ctx, -13, -10, 13, -10, { width: 4, color: ink, rnd, passes: 1 }); D.circle(ctx, 0, -20, 4, { width: 3.5, color: ink, rnd }); }
+      D.circle(ctx, 0, 0, 17, { width: 4.5, color: ink, rnd }); // round portrait frame
+      ctx.save();
+      ctx.beginPath(); ctx.arc(0, 0, 15.4, 0, Math.PI * 2); ctx.clip(); // keep the head inside the frame
+      // the portrait shows the fighter's actual HEAD (their drawing, or the built-in bear default)
+      if (!(DS.skin && DS.skin.headBust && DS.skin.headBust(ctx, ch, 15, rnd))) {
+        ctx.strokeStyle = ink; ctx.lineWidth = 3.5; ctx.lineCap = 'round'; // generic fallback eyes
+        for (const ex of [-4, 4]) { ctx.beginPath(); ctx.moveTo(ex, -2); ctx.lineTo(ex, 4); ctx.stroke(); }
+      }
+      ctx.restore();
     }
 
     _heart(ctx, x, y, s, filled, rnd) {

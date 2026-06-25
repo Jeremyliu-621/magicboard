@@ -3,8 +3,8 @@
   'use strict';
 
   const BINDINGS = [
-    { left: 'KeyA', right: 'KeyD', up: 'KeyW', down: 'KeyS', attack: 'KeyF', special: 'KeyG', shield: 'ShiftLeft', finisher: 'KeyT' },
-    { left: 'ArrowLeft', right: 'ArrowRight', up: 'ArrowUp', down: 'ArrowDown', attack: 'Period', special: 'Slash', shield: 'ShiftRight', finisher: 'KeyM' },
+    { left: 'KeyA', right: 'KeyD', up: 'KeyW', down: 'KeyS', attack: 'KeyF', special: 'KeyG', shield: 'ShiftLeft' },
+    { left: 'ArrowLeft', right: 'ArrowRight', up: 'ArrowUp', down: 'ArrowDown', attack: 'Period', special: 'Slash', shield: 'ShiftRight' },
   ];
   // keys we own (so the page doesn't scroll / quick-find)
   const OWNED = new Set();
@@ -38,7 +38,6 @@
         pressUp: this.pressed(b.up), pressDown: this.pressed(b.down),
         pressAttack: this.pressed(b.attack), pressSpecial: this.pressed(b.special),
         holdAttack: !!this.held[b.attack], holdSpecial: !!this.held[b.special],
-        pressFinisher: this.pressed(b.finisher),   // item-finisher trigger (P1 'T', P2 'M')
       };
     },
     bindings: BINDINGS,

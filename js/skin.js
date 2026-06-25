@@ -85,7 +85,7 @@
     const h = lo.concat(hi);
     return h.length >= 3 ? h : null;
   }
-  // Ddoski reads as a soft-brown bear: the silhouette fill is a light fur tone (kept light so
+  // bear reads as a soft-brown bear: the silhouette fill is a light fur tone (kept light so
   // the ink linework still carries the drawing), with a paler cream belly for a bit of contrast.
   // It also keeps him opaque so bushes/scenery don't show through the body.
   const FUR = D.mix(D.COL.paper, '#8a5630', 0.42);    // light brown — head + limbs
@@ -119,6 +119,43 @@
     ctx.restore();
   }
 
+  // Procedural blink/expression for a skin that declares face anchors (the built-in bear).
+  // Closes the eyes on blink/shield (fur-cover + a sleepy lid curve) and crosses them out on hurt,
+  // so a drawn fighter gets the same liveliness as the parametric Sprout/Acorn faces.
+  function faceFx(ctx, face, blink, expr, col) {
+    const eyes = face.eyes || [];
+    const closed = blink || expr === 'shield';
+    if (!closed && expr !== 'hurt') return;
+    ctx.save(); ctx.lineCap = 'round'; ctx.strokeStyle = col;
+    eyes.forEach((e) => {
+      const x = e[0], y = e[1], rx = e[2] || 5, ry = e[3] || 6;
+      ctx.beginPath(); ctx.ellipse(x, y, rx + 0.8, ry + 0.8, 0, 0, Math.PI * 2); ctx.fillStyle = FUR; ctx.fill(); // hide the drawn eye
+      ctx.lineWidth = 2.4;
+      if (closed) { ctx.beginPath(); ctx.moveTo(x - rx, y - 1); ctx.quadraticCurveTo(x, y + ry * 0.6, x + rx, y - 1); ctx.stroke(); } // sleepy lid
+      else { const s = rx * 0.85; ctx.beginPath(); ctx.moveTo(x - s, y - s); ctx.lineTo(x + s, y + s); ctx.moveTo(x + s, y - s); ctx.lineTo(x - s, y + s); ctx.stroke(); } // hurt X
+    });
+    ctx.restore();
+  }
+
+  // Draw just the character's HEAD (drawn skin, or the built-in bear default), fitted + centred
+  // into a circle of radius R at the local origin — used for HUD portraits. Returns false if there
+  // is no head art to draw (caller can fall back to a generic face).
+  function headBust(ctx, ch, R, rnd, col) {
+    const skin = hasSkin(ch) ? ch.skin : (DS.BEAR_SKIN || null);
+    const head = skin && skin.parts && skin.parts.head;
+    if (!head || !head.strokes || !head.strokes.length) return false;
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const s of head.strokes) for (const pt of s.pts) { x0 = Math.min(x0, pt[0]); y0 = Math.min(y0, pt[1]); x1 = Math.max(x1, pt[0]); y1 = Math.max(y1, pt[1]); }
+    const w = (x1 - x0) || 1, h = (y1 - y0) || 1, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    const sc = (2 * R) / Math.max(w, h) * 0.94;
+    ctx.save();
+    ctx.scale(sc, sc); ctx.translate(-cx, -cy);
+    fillSilhouette(ctx, head, FUR);
+    drawStrokes(ctx, head.strokes, rnd, col || D.COL.ink);
+    ctx.restore();
+    return true;
+  }
+
   // Render skinned fighter in LOCAL space (caller already translated to world pos).
   function render(ctx, ch, p, opts) {
     opts = opts || {};
@@ -140,7 +177,10 @@
     ctx.globalAlpha = 1;
 
     ctx.save(); ctx.translate(PIVOTS.body.x, PIVOTS.body.y); part(ctx, ch, 'body', rnd, col); ctx.restore();
-    ctx.save(); ctx.translate(PIVOTS.head.x + (p.headX || 0), PIVOTS.head.y + (p.headY || 0)); part(ctx, ch, 'head', rnd, col); ctx.restore();
+    ctx.save(); ctx.translate(PIVOTS.head.x + (p.headX || 0), PIVOTS.head.y + (p.headY || 0));
+    part(ctx, ch, 'head', rnd, col);
+    if (ch.skin.face) faceFx(ctx, ch.skin.face, opts.blink, opts.expr, col); // blink / hurt eyes (built-in bear)
+    ctx.restore();
 
     limb(ctx, ch, 'armFront', p.armFront.sh, rnd, col);
     limb(ctx, ch, 'legFront', p.legFront.hip, rnd, col);
@@ -162,5 +202,5 @@
     ghost('head', () => { ctx.beginPath(); ctx.arc(0, -30, 16, 0, 7); ctx.fill(); });
   }
 
-  DS.skin = { PARTS: PART_LIST, PIVOTS, REST, BONES, emptySkin, hasSkin, assign, render, drawMannequin, drawStrokes };
+  DS.skin = { PARTS: PART_LIST, PIVOTS, REST, BONES, emptySkin, hasSkin, assign, render, drawMannequin, drawStrokes, headBust };
 })(window);

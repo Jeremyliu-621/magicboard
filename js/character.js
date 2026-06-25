@@ -81,8 +81,10 @@
   // fighter center. opts: { facing, color, expr, blink, seed }
   function drawFighter(ctx, ch, p, opts) {
     opts = opts || {};
-    // a hand-drawn skin replaces the parametric stick figure (same rig/joints) — Ddoski uses this
+    // a hand-drawn skin replaces the parametric stick figure (same rig/joints)
     if (DS.skin && DS.skin.hasSkin(ch)) { DS.skin.render(ctx, ch, p, opts); return; }
+    // no drawn fighter yet → the built-in default look is the bear (not the stick figure)
+    if (DS.skin && DS.BEAR_SKIN) { DS.skin.render(ctx, { skin: DS.BEAR_SKIN, stats: ch.stats }, p, opts); return; }
     const facing = opts.facing || 1;
     const col = opts.color || D.COL.ink;
     const rnd = DS.makeRng(opts.seed || 7);

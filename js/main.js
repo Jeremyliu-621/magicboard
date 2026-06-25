@@ -79,6 +79,7 @@
   const drawCanvas = document.getElementById('draw-canvas');
   const drawTitle = document.getElementById('draw-title');
   const ULTS = [{ id: 'hammer', name: 'Hammer' }, { id: 'sniper', name: 'Sniper' }, { id: 'werewolf', name: 'Werewolf' }];
+  const PCOL = ['#5b8c5a', '#c0603a', '#3f6fa0', '#9a6cb0', '#b58a2e', '#3f8f86']; // per-player accent (matches the in-game P-markers)
   const mkEl = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
   // ---- doodle icons ----
   function paintCanvas(cv, lw, lh, fn) {
@@ -237,9 +238,12 @@
   function lobbyColumn(i) {
     const onPhone = DS.Net.hasPlayer(i + 1);   // a phone owns this slot → host shows it read-only
     const col = mkEl('div', 'lobby-col' + (ready[i] ? ' ready' : ''));
+    col.style.setProperty('--pc', PCOL[i % PCOL.length]);  // per-player accent (top bar, name, ready glow)
     const tag = mkEl('div', 'lobby-col-name', (onPhone ? '📱 ' : '') + 'P' + (i + 1));
     col.appendChild(tag);
-    const cc = mkEl('canvas', 'lobby-char'); col.appendChild(cc); paintCanvas(cc, 120, 108, (ctx) => drawCharPreview(ctx, i, 120, 108));
+    const port = mkEl('div', 'lobby-portrait');
+    const cc = mkEl('canvas', 'lobby-char'); port.appendChild(cc); paintCanvas(cc, 150, 132, (ctx) => drawCharPreview(ctx, i, 150, 132));
+    col.appendChild(port);
 
     if (onPhone) {
       // mirror-only: the phone draws, picks an ult, and readies; the host just reflects it.
@@ -271,7 +275,7 @@
   function buildLobbyCols() {
     lobbyCols.innerHTML = ''; for (let i = 0; i < ults.length; i++) lobbyCols.appendChild(lobbyColumn(i));
     const allReady = ults.length > 0 && ready.every(Boolean);
-    lobbyHint.textContent = allReady ? 'starting…' : 'pick your ultimate, then Ready';
+    lobbyHint.textContent = allReady ? 'starting…' : '';
     if (allReady && !cd) startCountdown();
     else if (!allReady && cd) { cancelCountdown(); lobby.hidden = false; DS.Net.broadcast({ t: 'notstarting' }); }
   }
@@ -279,11 +283,10 @@
     lobbyQR.innerHTML = ''; lobbyPlayers.innerHTML = '';
     if (DS.Net.available() && DS.Net.connected) {
       const img = document.createElement('img'); img.src = '/qr?d=' + encodeURIComponent(DS.Net.joinURL()); img.alt = 'scan to play';
-      lobbyQR.appendChild(img); lobbyQR.appendChild(mkEl('div', 'lobby-cap', '🎮 Play (phone)'));
-      // iPad draw pad: a second QR -> /draw?lobby=CODE (draw -> drag onto the mini-map -> live spawn)
-      const dimg = document.createElement('img'); dimg.src = '/qr?d=' + encodeURIComponent(location.origin + '/draw?lobby=' + DS.Net.code); dimg.alt = 'scan to draw';
-      lobbyQR.appendChild(dimg); lobbyQR.appendChild(mkEl('div', 'lobby-cap', '✏️ Draw (iPad)'));
-      lobbyQR.appendChild(mkEl('div', 'lobby-code', DS.Net.code));
+      const meta = mkEl('div', 'lobby-qr-meta');
+      meta.appendChild(mkEl('div', 'lobby-cap', '🎮 Scan to play'));
+      meta.appendChild(mkEl('div', 'lobby-code', DS.Net.code));
+      lobbyQR.appendChild(img); lobbyQR.appendChild(meta);
       for (let s = 1; s <= DS.Net.MAX; s++) { const pl = DS.Net.players[s]; const chip = mkEl('div', 'lobby-slot' + (pl ? ' on' : '')); chip.appendChild(mkEl('span', 'slot-tag', 'P' + s)); chip.appendChild(mkEl('span', 'slot-name', pl ? pl.name : 'open')); lobbyPlayers.appendChild(chip); }
     } else {
       lobbyQR.appendChild(mkEl('div', 'lobby-note', 'Keyboard play — P1 & P2 share one keyboard. (Run node server.js for phone players.)'));
