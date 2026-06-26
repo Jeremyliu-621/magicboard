@@ -175,6 +175,40 @@ body{
 .help-misc{margin:14px 0 12px;font-size:17px;color:var(--ink-soft);}
 #help-close{font-family:inherit;font-size:18px;cursor:pointer;border:var(--line) solid var(--ink);
   border-radius:12px;background:var(--ink);color:var(--paper);padding:3px 18px 5px;}
+
+/* How to Play: a big scrollable gallery of animated mechanics */
+.howto-card{position:relative;width:min(1520px,96vw);max-height:93vh;min-width:0;
+  display:flex;flex-direction:column;padding:12px 16px 10px;}
+.howto-title{margin:0 0 1px;}
+.howto-sub{font-size:14px;color:var(--ink-soft);margin:0 0 6px;}
+.howto-close{position:absolute;top:10px;right:12px;font-size:16px;line-height:1;
+  padding:5px 10px 6px;border-radius:10px;}
+/* two columns: sections flow into 2 balanced columns; cards are big enough to read comfortably */
+.howto-grid{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;
+  column-count:2;column-gap:36px;padding:1px 6px 4px 2px;}
+.howto-sec{break-inside:avoid;display:block;max-width:none;margin:0 0 22px;}
+.howto-cells{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;}
+.howto-section{font-family:'Gloria Hallelujah',cursive;font-size:18px;
+  color:var(--accent);margin:0 2px 8px;border-bottom:2px dashed rgba(47,42,38,.3);padding-bottom:4px;}
+.howto-cell{position:relative;border:var(--line) solid var(--ink);border-radius:12px 9px 11px 10px;
+  background:var(--paper);box-shadow:2px 3px 0 rgba(47,42,38,.18);overflow:hidden;}
+.howto-cv{display:block;width:100%;height:104px;background:var(--paper);}
+/* button chips float in the top-right corner of the animation (no text labels) */
+.howto-seq{position:absolute;top:5px;right:5px;display:flex;flex-wrap:wrap;justify-content:flex-end;
+  align-items:center;gap:2px;max-width:88%;
+  background:rgba(246,241,231,.72);border-radius:7px;padding:2px 3px;}
+.howto-arrow{color:var(--ink-soft);font-size:11px;margin:0 1px;}
+.howto-step{display:inline-flex;gap:2px;}
+.howto-step kbd{font-family:'Patrick Hand',cursive;font-size:12px;line-height:1;min-width:15px;text-align:center;
+  background:var(--paper-2);border:2px solid var(--ink);border-radius:6px;padding:1px 4px 2px;color:var(--ink);
+  transition:transform .08s ease, background .08s ease, color .08s ease;}
+.howto-step.on kbd{background:var(--accent);color:var(--paper);transform:translateY(1px) scale(1.12);}
+.howto-legend{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:16px;color:var(--ink-soft);
+  margin-top:8px;padding-top:7px;border-top:2px dashed rgba(47,42,38,.25);}
+.howto-legend b{color:var(--ink);}
+.howto-legend-misc{flex-basis:100%;}
+.howto-legend kbd{font-family:'Patrick Hand',cursive;background:var(--paper-2);border:2px solid var(--ink);
+  border-radius:7px;padding:1px 7px;margin:0 1px;color:var(--ink);font-size:15px;}
 /* main menu */
 /* full-screen OPAQUE pages (its own page, no game peeking through) */
 #menu-overlay,#lobby-overlay,#draw-overlay,#countdown-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;

@@ -52,8 +52,8 @@
 
   // help overlay
   const help = document.getElementById('help-overlay');
-  const openHelp = () => { help.hidden = false; };
-  const closeHelp = () => { help.hidden = true; };
+  const openHelp = () => { help.hidden = false; if (DS.HowTo) DS.HowTo.open(); };
+  const closeHelp = () => { help.hidden = true; if (DS.HowTo) DS.HowTo.close(); };
   document.getElementById('btn-help').onclick = openHelp;
   document.getElementById('help-close').onclick = closeHelp;
 
